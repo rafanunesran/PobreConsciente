@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { signOut } from 'firebase/auth'
-import { Download, LogOut, Moon, Sun, Tag, Trash2, Users } from 'lucide-react'
+import { Bell, BellOff, Download, LogOut, Moon, Sun, Tag, Trash2, Users } from 'lucide-react'
 import { auth } from '../../lib/firebase'
 import { useAuthStore } from '../../stores/authStore'
 import { useThemeStore } from '../../stores/themeStore'
@@ -12,6 +12,12 @@ import { Input } from '../../components/ui/Input'
 import { resetUserData } from './resetUserData'
 import { moreNavItems } from '../../components/layout/navItems'
 import { exportAllTransactionsCsv } from '../transactions/exportAll'
+import {
+  billRemindersEnabled,
+  disableBillReminders,
+  enableBillReminders,
+  notificationsSupported,
+} from '../reminders/billNotifications'
 
 const RESET_CONFIRM_WORD = 'ZERAR'
 
@@ -29,6 +35,8 @@ export function PerfilPage() {
   const [resetError, setResetError] = useState<string | null>(null)
   const [isExporting, setIsExporting] = useState(false)
   const [exportError, setExportError] = useState<string | null>(null)
+  const [remindersOn, setRemindersOn] = useState(billRemindersEnabled)
+  const [remindersMessage, setRemindersMessage] = useState<string | null>(null)
 
   // NOTE: PerfilPage só é renderizada atrás de <ProtectedRoute>, então
   // `user` nunca deveria ser null aqui — o guard é só pro TS não reclamar.
@@ -45,6 +53,22 @@ export function PerfilPage() {
     } finally {
       setIsExporting(false)
     }
+  }
+
+  async function toggleReminders() {
+    setRemindersMessage(null)
+    if (remindersOn) {
+      disableBillReminders()
+      setRemindersOn(false)
+      return
+    }
+    const ok = await enableBillReminders()
+    setRemindersOn(ok)
+    setRemindersMessage(
+      ok
+        ? 'Pronto! Ao abrir o app você recebe um aviso das contas vencidas ou vencendo em até 2 dias.'
+        : 'O navegador bloqueou as notificações. Libere nas configurações do site e tente de novo.',
+    )
   }
 
   async function handleReset() {
@@ -104,6 +128,18 @@ export function PerfilPage() {
           {isExporting ? 'Exportando...' : 'Exportar lançamentos (CSV)'}
         </Button>
         {exportError ? <p className="text-center text-sm text-danger">{exportError}</p> : null}
+
+        {notificationsSupported() ? (
+          <>
+            <Button variant="secondary" onClick={toggleReminders}>
+              {remindersOn ? <BellOff size={20} /> : <Bell size={20} />}
+              {remindersOn ? 'Desativar avisos de vencimento' : 'Avisar vencimentos'}
+            </Button>
+            {remindersMessage ? (
+              <p className="text-center text-xs text-light-secondary dark:text-dark-secondary">{remindersMessage}</p>
+            ) : null}
+          </>
+        ) : null}
 
         <Button variant="secondary" onClick={toggleTheme}>
           {theme === 'dark' ? <Sun size={20} /> : <Moon size={20} />}

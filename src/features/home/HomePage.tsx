@@ -14,6 +14,7 @@ import { useCategories } from '../categories/useCategories'
 import { CategorySpendingCard } from '../categories/CategorySpendingCard'
 import { useBudgets } from '../budgets/useBudgets'
 import { BudgetsSummaryCard } from '../budgets/BudgetsSummaryCard'
+import { UpcomingBillsCard } from '../reminders/UpcomingBillsCard'
 import { MonthSelector } from '../../components/ui/MonthSelector'
 import { formatBRL } from '../../lib/utils'
 
@@ -72,6 +73,8 @@ export function HomePage() {
           </Link>
         ))}
       </section>
+
+      <UpcomingBillsCard transactions={transactions} cards={cards} />
 
       <MonthSelector value={selectedMonth} onChange={setSelectedMonth} />
 
