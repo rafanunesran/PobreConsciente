@@ -86,6 +86,7 @@ service cloud.firestore {
         && request.resource.data.type in ['expense', 'income']
         && request.resource.data.icon is string
         && request.resource.data.color is string
+        && (!request.resource.data.keys().hasAny(['parentId']) || request.resource.data.parentId is string)
         && hasValidCreatedBy();
     }
 

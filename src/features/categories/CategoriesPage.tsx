@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Plus } from 'lucide-react'
+import { CornerDownRight, Plus } from 'lucide-react'
 import { useAuthStore } from '../../stores/authStore'
 import { useWorkspaceStore } from '../../stores/workspaceStore'
 import { useCategories } from './useCategories'
@@ -8,8 +8,9 @@ import { createCategory } from './api'
 import { CATEGORY_ICON_COMPONENTS, CATEGORY_TYPE_LABELS, SUGGESTED_CATEGORIES, type Category, type CategoryType } from './types'
 import { Button } from '../../components/ui/Button'
 import { useUserProfiles } from '../family/useUserProfiles'
+import { effectiveParentId } from './categoryTree'
 
-function CategoryChip({ category }: { category: Category }) {
+function CategoryChip({ category, isChild }: { category: Category; isChild?: boolean }) {
   const Icon = CATEGORY_ICON_COMPONENTS[category.icon]
   const family = useWorkspaceStore((state) => state.family)
   const profiles = useUserProfiles(family ? [category.createdBy] : [])
@@ -19,6 +20,7 @@ function CategoryChip({ category }: { category: Category }) {
       to={`/categorias/${category.id}/editar`}
       className="flex items-center gap-2 rounded-xl border border-border-light bg-surface-light py-2 pl-2 pr-3 transition-colors duration-200 hover:border-brand-500 dark:border-border-dark dark:bg-surface-dark-elevated"
     >
+      {isChild ? <CornerDownRight size={14} className="text-light-secondary dark:text-dark-secondary" /> : null}
       <span
         className="flex h-8 w-8 items-center justify-center rounded-full text-white"
         style={{ backgroundColor: category.color }}
@@ -98,6 +100,8 @@ export function CategoriesPage() {
 
   if (!user || !workspaceId) return null
 
+  const categoriesById = new Map(categories.map((c) => [c.id, c]))
+
   return (
     <div className="flex flex-col gap-6 px-6 pt-4">
       <div className="flex items-center justify-between">
@@ -128,10 +132,24 @@ export function CategoriesPage() {
               </h2>
               <div className="flex flex-wrap gap-2">
                 {categories
-                  .filter((category) => category.type === type)
-                  .map((category) => (
-                    <CategoryChip key={category.id} category={category} />
-                  ))}
+                  .filter((category) => category.type === type && effectiveParentId(category, categoriesById) === undefined)
+                  .map((category) => {
+                    const children = categories.filter(
+                      (c) => effectiveParentId(c, categoriesById) === category.id,
+                    )
+                    return children.length === 0 ? (
+                      <CategoryChip key={category.id} category={category} />
+                    ) : (
+                      // Mãe + filhas num bloco só, ocupando a linha inteira
+                      // pra deixar claro o agrupamento.
+                      <div key={category.id} className="flex w-full flex-wrap gap-2">
+                        <CategoryChip category={category} />
+                        {children.map((child) => (
+                          <CategoryChip key={child.id} category={child} isChild />
+                        ))}
+                      </div>
+                    )
+                  })}
               </div>
               <SuggestionSection type={type} categories={categories} />
             </div>

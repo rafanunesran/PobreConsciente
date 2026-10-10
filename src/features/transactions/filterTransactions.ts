@@ -2,6 +2,7 @@ import { effectiveMonth } from '../cards/invoiceUtils'
 import type { CreditCard } from '../cards/types'
 import type { Category } from '../categories/types'
 import type { Transaction, TransactionType } from './types'
+import { categoryWithChildren } from '../categories/categoryTree'
 
 export interface TransactionFilters {
   text: string
@@ -54,11 +55,16 @@ export function filterTransactions(
 ): Transaction[] {
   const text = normalizeSearch(filters.text)
   const [linkedKind, linkedId] = filters.linked.split(':')
+  // Filtrar por uma categoria principal traz também as subcategorias dela.
+  const categoryIds =
+    filters.categoryId !== ''
+      ? categoryWithChildren(filters.categoryId, Array.from(categoriesById.values()))
+      : null
 
   return transactions.filter((t) => {
     if (!filters.allPeriod && effectiveMonth(t, cardsById) !== selectedMonth) return false
     if (filters.type !== 'all' && t.type !== filters.type) return false
-    if (filters.categoryId !== '' && t.categoryId !== filters.categoryId) return false
+    if (categoryIds !== null && !categoryIds.has(t.categoryId)) return false
     if (linkedKind === 'account' && t.accountId !== linkedId) return false
     if (linkedKind === 'card' && t.cardId !== linkedId) return false
     if (filters.status === 'paid' && !t.paid) return false

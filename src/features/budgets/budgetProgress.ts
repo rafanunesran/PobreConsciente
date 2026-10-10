@@ -1,4 +1,5 @@
 import { categoryTotals } from '../categories/categoryTotals'
+import { categoryWithChildren } from '../categories/categoryTree'
 import type { Category } from '../categories/types'
 import type { CreditCard } from '../cards/types'
 import type { Transaction } from '../transactions/types'
@@ -24,8 +25,8 @@ export function budgetStatus(percent: number): BudgetStatus {
   return 'ok'
 }
 
-// Gasto do mês por orçamento — usa exatamente a mesma soma do gráfico de
-// gastos por categoria (categoryTotals), então os dois números sempre batem.
+// Gasto do mês por orçamento — usa a mesma soma do gráfico de gastos por
+// categoria (categoryTotals), então os dois números sempre batem.
 export function computeBudgetProgress(
   budgets: Budget[],
   transactions: Transaction[],
@@ -35,7 +36,7 @@ export function computeBudgetProgress(
 ): BudgetProgress[] {
   const categoriesById = new Map(categories.map((c) => [c.id, c]))
   const spentByCategory = new Map(
-    categoryTotals(transactions, categories, cardsById, selectedMonth, 'expense').map((t) => [
+    categoryTotals(transactions, categories, cardsById, selectedMonth, 'expense', false).map((t) => [
       t.categoryId,
       t.value,
     ]),
@@ -43,7 +44,9 @@ export function computeBudgetProgress(
 
   return budgets
     .map((budget) => {
-      const spent = spentByCategory.get(budget.categoryId) ?? 0
+      // Orçamento numa categoria principal cobre também as subcategorias.
+      let spent = 0
+      for (const id of categoryWithChildren(budget.categoryId, categories)) spent += spentByCategory.get(id) ?? 0
       const percent = budget.amount > 0 ? (spent / budget.amount) * 100 : 0
       return {
         budget,

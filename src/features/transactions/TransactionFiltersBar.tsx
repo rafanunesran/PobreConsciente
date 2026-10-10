@@ -5,6 +5,7 @@ import { cn } from '../../lib/utils'
 import type { Account } from '../accounts/types'
 import type { CreditCard } from '../cards/types'
 import type { Category } from '../categories/types'
+import { categoryOptions } from '../categories/categoryTree'
 import { EMPTY_FILTERS, hasActiveFilters, type TransactionFilters } from './filterTransactions'
 
 interface TransactionFiltersBarProps {
@@ -54,8 +55,7 @@ export function TransactionFiltersBar({
 }: TransactionFiltersBarProps) {
   const [open, setOpen] = useState(false)
   const active = hasActiveFilters(filters)
-  const visibleCategories =
-    filters.type === 'all' ? categories : categories.filter((c) => c.type === filters.type)
+  const visibleCategories = categoryOptions(categories, filters.type === 'all' ? undefined : filters.type)
 
   return (
     <div className="flex flex-col gap-3">
@@ -113,9 +113,9 @@ export function TransactionFiltersBar({
             onChange={(e) => onChange({ ...filters, categoryId: e.target.value })}
           >
             <option value="">Todas</option>
-            {visibleCategories.map((category) => (
+            {visibleCategories.map(({ category, label }) => (
               <option key={category.id} value={category.id}>
-                {category.name}
+                {label}
               </option>
             ))}
           </Select>

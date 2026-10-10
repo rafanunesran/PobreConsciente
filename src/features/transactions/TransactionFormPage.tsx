@@ -11,6 +11,7 @@ import { Button } from '../../components/ui/Button'
 import { Input } from '../../components/ui/Input'
 import { Select } from '../../components/ui/Select'
 import { cn } from '../../lib/utils'
+import { categoryOptions } from '../categories/categoryTree'
 import { expenseSchema, incomeSchema, type ExpenseFormData, type IncomeFormData } from './schemas'
 import { createTransaction, deleteTransaction, getTransaction, updateTransaction } from './api'
 import { createRecurringTransaction } from './recurring'
@@ -42,7 +43,7 @@ export function TransactionFormPage() {
   const { accounts } = useAccounts(workspaceId ?? '')
   const { cards } = useCards(workspaceId ?? '')
   const { categories } = useCategories(workspaceId ?? '')
-  const relevantCategories = categories.filter((c) => c.type === (isExpense ? 'expense' : 'income'))
+  const relevantCategories = categoryOptions(categories, isExpense ? 'expense' : 'income')
 
   const [formError, setFormError] = useState<string | null>(null)
   const [isLoadingTransaction, setIsLoadingTransaction] = useState(isEditMode)
@@ -433,9 +434,9 @@ export function TransactionFormPage() {
             {...expenseForm.register('categoryId')}
           >
             <option value="">Selecione</option>
-            {relevantCategories.map((category) => (
+            {relevantCategories.map(({ category, label }) => (
               <option key={category.id} value={category.id}>
-                {category.name}
+                {label}
               </option>
             ))}
           </Select>
@@ -636,9 +637,9 @@ export function TransactionFormPage() {
             {...incomeForm.register('categoryId')}
           >
             <option value="">Selecione</option>
-            {relevantCategories.map((category) => (
+            {relevantCategories.map(({ category, label }) => (
               <option key={category.id} value={category.id}>
-                {category.name}
+                {label}
               </option>
             ))}
           </Select>

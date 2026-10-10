@@ -8,6 +8,7 @@ import { useCategories } from '../categories/useCategories'
 import { Button } from '../../components/ui/Button'
 import { Input } from '../../components/ui/Input'
 import { Select } from '../../components/ui/Select'
+import { categoryOptions } from '../categories/categoryTree'
 import { budgetSchema, type BudgetFormData } from './schemas'
 import { createBudget, deleteBudget, getBudget, updateBudget } from './api'
 import { useBudgets } from './useBudgets'
@@ -60,7 +61,9 @@ export function BudgetFormPage() {
   // Uma categoria só pode ter um orçamento — as que já têm somem da lista
   // (exceto a do próprio orçamento sendo editado).
   const takenCategoryIds = new Set(budgets.filter((b) => b.id !== budgetId).map((b) => b.categoryId))
-  const availableCategories = categories.filter((c) => c.type === 'expense' && !takenCategoryIds.has(c.id))
+  const availableCategories = categoryOptions(categories, 'expense').filter(
+    ({ category }) => !takenCategoryIds.has(category.id),
+  )
 
   async function onSubmit(data: BudgetFormData) {
     if (!user || !workspaceId) return
@@ -130,9 +133,9 @@ export function BudgetFormPage() {
           {...form.register('categoryId')}
         >
           <option value="">Selecione</option>
-          {availableCategories.map((category) => (
+          {availableCategories.map(({ category, label }) => (
             <option key={category.id} value={category.id}>
-              {category.name}
+              {label}
             </option>
           ))}
         </Select>
