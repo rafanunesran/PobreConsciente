@@ -244,6 +244,27 @@ export const router = createBrowserRouter(
           },
         },
         {
+          path: 'orcamentos',
+          lazy: async () => {
+            const { BudgetsPage } = await import('./features/budgets/BudgetsPage')
+            return { Component: BudgetsPage }
+          },
+        },
+        {
+          path: 'orcamentos/novo',
+          lazy: async () => {
+            const { BudgetFormPage } = await import('./features/budgets/BudgetFormPage')
+            return { Component: BudgetFormPage }
+          },
+        },
+        {
+          path: 'orcamentos/:budgetId/editar',
+          lazy: async () => {
+            const { BudgetFormPage } = await import('./features/budgets/BudgetFormPage')
+            return { Component: BudgetFormPage }
+          },
+        },
+        {
           path: 'perfil',
           lazy: async () => {
             const { PerfilPage } = await import('./features/auth/PerfilPage')

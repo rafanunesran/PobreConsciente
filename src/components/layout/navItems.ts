@@ -1,4 +1,4 @@
-import { CreditCard, Home, Receipt, User, Wallet, type LucideIcon } from 'lucide-react'
+import { CreditCard, Home, PiggyBank, Receipt, User, Wallet, type LucideIcon } from 'lucide-react'
 
 export interface NavItem {
   to: string
@@ -15,4 +15,10 @@ export const navItems: NavItem[] = [
   { to: '/contas', label: 'Contas', icon: Wallet, end: false },
   { to: '/registros/novo', label: 'Extrato', icon: Receipt, end: false },
   { to: '/perfil', label: 'Perfil', icon: User, end: false },
+]
+
+// Telas secundárias — não cabem na bottom nav (5 itens já é o teto no
+// mobile), então aparecem só na Sidebar (desktop) e no Perfil (mobile).
+export const moreNavItems: NavItem[] = [
+  { to: '/orcamentos', label: 'Orçamentos', icon: PiggyBank, end: false },
 ]

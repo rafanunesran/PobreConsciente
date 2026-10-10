@@ -87,6 +87,14 @@ service cloud.firestore {
         && hasValidCreatedBy();
     }
 
+    match /users/{userId}/budgets/{budgetId} {
+      allow read, delete: if request.auth != null && isWorkspaceMember(userId);
+      allow create, update: if request.auth != null && isWorkspaceMember(userId)
+        && request.resource.data.categoryId is string
+        && request.resource.data.amount is number && request.resource.data.amount > 0
+        && hasValidCreatedBy();
+    }
+
     match /users/{userId}/transactions/{transactionId} {
       allow read, delete: if request.auth != null && isWorkspaceMember(userId);
       allow create, update: if request.auth != null && isWorkspaceMember(userId)

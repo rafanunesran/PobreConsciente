@@ -10,6 +10,7 @@ import { Avatar } from '../../components/ui/Avatar'
 import { Button } from '../../components/ui/Button'
 import { Input } from '../../components/ui/Input'
 import { resetUserData } from './resetUserData'
+import { moreNavItems } from '../../components/layout/navItems'
 
 const RESET_CONFIRM_WORD = 'ZERAR'
 
@@ -59,6 +60,15 @@ export function PerfilPage() {
       </div>
 
       <div className="flex w-full max-w-xs flex-col gap-3">
+        {moreNavItems.map(({ to, label, icon: Icon }) => (
+          <Link key={to} to={to}>
+            <Button variant="secondary" className="w-full">
+              <Icon size={20} />
+              {label}
+            </Button>
+          </Link>
+        ))}
+
         <Link to="/categorias">
           <Button variant="secondary" className="w-full">
             <Tag size={20} />
@@ -88,7 +98,7 @@ export function PerfilPage() {
         {confirmingReset ? (
           <div className="flex flex-col gap-3">
             <p className="text-sm text-danger">
-              Isso apaga TODOS os dados (contas, cartões, categorias, transações e caixinhas)
+              Isso apaga TODOS os dados (contas, cartões, categorias, transações, caixinhas e orçamentos)
               para sempre. Não pode ser desfeito.
               {family
                 ? ` Isso afeta TODOS os ${family.memberIds.length} membros da família, não só você.`
