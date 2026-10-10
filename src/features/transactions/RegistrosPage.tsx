@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Plus, Receipt } from 'lucide-react'
+import { Download, Plus, Receipt } from 'lucide-react'
 import { useAuthStore } from '../../stores/authStore'
 import { useWorkspaceStore } from '../../stores/workspaceStore'
 import { useTransactions } from './useTransactions'
@@ -14,6 +14,8 @@ import { Button } from '../../components/ui/Button'
 import { TransactionFiltersBar } from './TransactionFiltersBar'
 import { TransactionSearchResults } from './TransactionSearchResults'
 import { collectTags } from './tags'
+import { downloadCsv, transactionsToCsv } from './exportCsv'
+import { effectiveMonth } from '../cards/invoiceUtils'
 import { EMPTY_FILTERS, filterTransactions, hasActiveFilters, type TransactionFilters } from './filterTransactions'
 
 export function RegistrosPage() {
@@ -42,18 +44,37 @@ export function RegistrosPage() {
 
   if (!user || !workspaceId) return null
 
+  // Exporta o que está na tela: o resultado da busca, ou o mês inteiro
+  // lançamento a lançamento (compras de cartão individuais incluídas).
+  function handleExport() {
+    const rows = filtering ? results : transactions.filter((t) => effectiveMonth(t, cardsById) === selectedMonth)
+    const suffix = filtering ? (filters.allPeriod ? 'busca' : `${selectedMonth}-busca`) : selectedMonth
+    downloadCsv(
+      `pobreconsciente-extrato-${suffix}.csv`,
+      transactionsToCsv(rows, { categoriesById, accountsById, cardsById }),
+    )
+  }
+
   return (
     <div className="flex flex-col gap-6 px-6 pt-4">
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-semibold text-light-primary dark:text-dark-primary">
           Registros
         </h1>
-        <Link to="/registros/novo">
-          <Button type="button" className="gap-1.5">
-            <Plus size={18} />
-            Novo
-          </Button>
-        </Link>
+        <div className="flex gap-2">
+          {transactions.length > 0 ? (
+            <Button type="button" variant="secondary" className="gap-1.5" onClick={handleExport} aria-label="Exportar CSV">
+              <Download size={18} />
+              <span className="hidden sm:inline">Exportar</span>
+            </Button>
+          ) : null}
+          <Link to="/registros/novo">
+            <Button type="button" className="gap-1.5">
+              <Plus size={18} />
+              Novo
+            </Button>
+          </Link>
+        </div>
       </div>
 
       {loading ? (

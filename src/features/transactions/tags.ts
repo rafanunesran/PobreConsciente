@@ -7,6 +7,7 @@ export const MAX_TAG_LENGTH = 20
 // "viagem sp" viram a mesma tag.
 export function normalizeTag(raw: string): string {
   return raw
+    .trim()
     .replace(/^#+/, '')
     .replace(/\s+/g, ' ')
     .trim()

@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { signOut } from 'firebase/auth'
-import { LogOut, Moon, Sun, Tag, Trash2, Users } from 'lucide-react'
+import { Download, LogOut, Moon, Sun, Tag, Trash2, Users } from 'lucide-react'
 import { auth } from '../../lib/firebase'
 import { useAuthStore } from '../../stores/authStore'
 import { useThemeStore } from '../../stores/themeStore'
@@ -11,6 +11,7 @@ import { Button } from '../../components/ui/Button'
 import { Input } from '../../components/ui/Input'
 import { resetUserData } from './resetUserData'
 import { moreNavItems } from '../../components/layout/navItems'
+import { exportAllTransactionsCsv } from '../transactions/exportAll'
 
 const RESET_CONFIRM_WORD = 'ZERAR'
 
@@ -26,10 +27,25 @@ export function PerfilPage() {
   const [confirmText, setConfirmText] = useState('')
   const [isResetting, setIsResetting] = useState(false)
   const [resetError, setResetError] = useState<string | null>(null)
+  const [isExporting, setIsExporting] = useState(false)
+  const [exportError, setExportError] = useState<string | null>(null)
 
   // NOTE: PerfilPage só é renderizada atrás de <ProtectedRoute>, então
   // `user` nunca deveria ser null aqui — o guard é só pro TS não reclamar.
   if (!user) return null
+
+  async function handleExport() {
+    if (!workspaceId) return
+    setIsExporting(true)
+    setExportError(null)
+    try {
+      await exportAllTransactionsCsv(workspaceId)
+    } catch {
+      setExportError('Não foi possível exportar. Tente novamente.')
+    } finally {
+      setIsExporting(false)
+    }
+  }
 
   async function handleReset() {
     if (!user || !workspaceId) return
@@ -82,6 +98,12 @@ export function PerfilPage() {
             Família
           </Button>
         </Link>
+
+        <Button variant="secondary" onClick={handleExport} disabled={isExporting}>
+          <Download size={20} />
+          {isExporting ? 'Exportando...' : 'Exportar lançamentos (CSV)'}
+        </Button>
+        {exportError ? <p className="text-center text-sm text-danger">{exportError}</p> : null}
 
         <Button variant="secondary" onClick={toggleTheme}>
           {theme === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
