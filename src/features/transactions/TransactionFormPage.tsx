@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useAuthStore } from '../../stores/authStore'
@@ -25,6 +25,8 @@ import {
 } from './series'
 import { SeriesScopeDialog } from './SeriesScopeDialog'
 import { TagInput } from './TagInput'
+import { AttachmentsSection } from '../attachments/AttachmentsSection'
+import { addAttachment, deleteAttachmentsOf, type NewAttachment } from '../attachments/api'
 import { collectTags } from './tags'
 import { useTransactions } from './useTransactions'
 import type { Transaction, TransactionFormData } from './types'
@@ -37,6 +39,8 @@ function todayISO(): string {
 
 export function TransactionFormPage() {
   const navigate = useNavigate()
+  const location = useLocation()
+  const attachmentFailed = (location.state as { attachmentFailed?: boolean } | null)?.attachmentFailed === true
   const { kind, transactionId } = useParams<{ kind: Kind; transactionId?: string }>()
   const isExpense = kind === 'despesa'
   const isEditMode = Boolean(transactionId)
@@ -66,6 +70,9 @@ export function TransactionFormPage() {
   >(null)
   const [scopeBusy, setScopeBusy] = useState(false)
   const [scopeError, setScopeError] = useState<string | null>(null)
+  // Comprovantes escolhidos antes do lançamento existir (modo criação) —
+  // gravados logo depois do createTransaction, já com o id em mãos.
+  const [pendingAttachments, setPendingAttachments] = useState<NewAttachment[]>([])
 
   const expenseForm = useForm<ExpenseFormData>({
     resolver: zodResolver(expenseSchema),
@@ -163,6 +170,24 @@ export function TransactionFormPage() {
 
   if (!user || !workspaceId) return null
 
+  // Cria um lançamento avulso e anexa os comprovantes pendentes. Se o
+  // anexo falhar, o lançamento já existe — abre a edição dele pra pessoa
+  // tentar anexar de novo, em vez de perder o arquivo em silêncio.
+  // Devolve false quando já navegou pra edição (o caller não segue pro extrato).
+  async function createSingleWithAttachments(payload: TransactionFormData): Promise<boolean> {
+    if (!user || !workspaceId) return false
+    const newId = await createTransaction(workspaceId, payload, user.uid)
+    try {
+      for (const attachment of pendingAttachments) {
+        await addAttachment(workspaceId, newId, attachment, user.uid)
+      }
+      return true
+    } catch {
+      navigate(`/registros/${kind}/${newId}/editar`, { replace: true, state: { attachmentFailed: true } })
+      return false
+    }
+  }
+
   async function onSubmitExpense(data: ExpenseFormData) {
     if (!user || !workspaceId) return
     setFormError(null)
@@ -237,7 +262,7 @@ export function TransactionFormPage() {
           tags: data.tags ?? [],
           ...linkage,
         }
-        await createTransaction(workspaceId, payload, user.uid)
+        if (!(await createSingleWithAttachments(payload))) return
       }
       navigate('/registros')
     } catch {
@@ -311,7 +336,7 @@ export function TransactionFormPage() {
           paid: data.paid,
           tags: data.tags ?? [],
         }
-        await createTransaction(workspaceId, payload, user.uid)
+        if (!(await createSingleWithAttachments(payload))) return
       }
       navigate('/registros')
     } catch {
@@ -324,6 +349,7 @@ export function TransactionFormPage() {
     setIsDeleting(true)
     try {
       await deleteTransaction(workspaceId, transactionId)
+      await deleteAttachmentsOf(workspaceId, [transactionId]).catch(() => undefined)
       navigate('/registros')
     } catch {
       setFormError('Não foi possível excluir. Tente novamente.')
@@ -343,6 +369,15 @@ export function TransactionFormPage() {
         await updateTransactionSeries(workspaceId, loadedTransaction, scopePrompt.payload, scope)
       } else {
         await deleteTransactionSeries(workspaceId, loadedTransaction, scope)
+        // Mesmo critério de alcance de series.ts (isInScope): o próprio
+        // lançamento sempre, os irmãos conforme o escopo escolhido.
+        const removedIds = [
+          loadedTransaction.id,
+          ...(scope === 'one'
+            ? []
+            : series.filter((t) => t.id !== loadedTransaction.id && (scope === 'all' || !t.paid)).map((t) => t.id)),
+        ]
+        await deleteAttachmentsOf(workspaceId, removedIds).catch(() => undefined)
       }
       navigate('/registros')
     } catch {
@@ -415,6 +450,11 @@ export function TransactionFormPage() {
         <h1 className="text-xl font-semibold text-light-primary dark:text-dark-primary">
           {isEditMode ? 'Editar' : 'Nova'} {isExpense ? 'despesa' : 'receita'}
         </h1>
+        {attachmentFailed ? (
+          <p className="text-sm text-danger">
+            O lançamento foi salvo, mas o comprovante não foi anexado. Tente anexar de novo abaixo.
+          </p>
+        ) : null}
         {seriesKind !== null ? (
           <p className="text-sm text-light-secondary dark:text-dark-secondary">
             {seriesKind === 'recurring'
@@ -628,6 +668,16 @@ export function TransactionFormPage() {
             </div>
           ) : null}
 
+          {isEditMode || recurrence === 'none' ? (
+            <AttachmentsSection
+              workspaceId={workspaceId}
+              userId={user.uid}
+              transactionId={transactionId}
+              pending={pendingAttachments}
+              onPendingChange={setPendingAttachments}
+            />
+          ) : null}
+
           {formError ? <p className="text-sm text-danger">{formError}</p> : null}
 
           <Button type="submit" disabled={expenseForm.formState.isSubmitting}>
@@ -780,6 +830,16 @@ export function TransactionFormPage() {
                 </div>
               </div>
             </div>
+          ) : null}
+
+          {isEditMode || incomeRecurrence === 'none' ? (
+            <AttachmentsSection
+              workspaceId={workspaceId}
+              userId={user.uid}
+              transactionId={transactionId}
+              pending={pendingAttachments}
+              onPendingChange={setPendingAttachments}
+            />
           ) : null}
 
           {formError ? <p className="text-sm text-danger">{formError}</p> : null}

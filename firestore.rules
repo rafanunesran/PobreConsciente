@@ -115,6 +115,20 @@ service cloud.firestore {
         && hasValidCreatedBy();
     }
 
+    // Comprovante guardado como data URL dentro do próprio documento (sem
+    // Firebase Storage) — o teto de tamanho protege o limite de 1 MiB do doc.
+    // Sem update: comprovante só é criado ou apagado.
+    match /users/{userId}/attachments/{attachmentId} {
+      allow read, delete: if request.auth != null && isWorkspaceMember(userId);
+      allow create: if request.auth != null && isWorkspaceMember(userId)
+        && request.resource.data.transactionId is string
+        && request.resource.data.name is string
+        && request.resource.data.mimeType in ['image/jpeg', 'application/pdf']
+        && request.resource.data.dataUrl is string
+        && request.resource.data.dataUrl.size() <= 900000
+        && hasValidCreatedBy();
+    }
+
     match /users/{userId}/recurringRules/{ruleId} {
       allow read, delete: if request.auth != null && isWorkspaceMember(userId);
       allow create, update: if request.auth != null && isWorkspaceMember(userId)

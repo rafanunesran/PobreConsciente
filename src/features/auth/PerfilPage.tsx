@@ -156,7 +156,7 @@ export function PerfilPage() {
         {confirmingReset ? (
           <div className="flex flex-col gap-3">
             <p className="text-sm text-danger">
-              Isso apaga TODOS os dados (contas, cartões, categorias, transações, caixinhas e orçamentos)
+              Isso apaga TODOS os dados (contas, cartões, categorias, transações, caixinhas, orçamentos e comprovantes)
               para sempre. Não pode ser desfeito.
               {family
                 ? ` Isso afeta TODOS os ${family.memberIds.length} membros da família, não só você.`
