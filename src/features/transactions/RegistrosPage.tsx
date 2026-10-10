@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Plus, Receipt } from 'lucide-react'
 import { useAuthStore } from '../../stores/authStore'
@@ -11,6 +11,9 @@ import { TransactionsGrid } from './TransactionsGrid'
 import { MonthSelector } from '../../components/ui/MonthSelector'
 import { currentYearMonth } from './dateUtils'
 import { Button } from '../../components/ui/Button'
+import { TransactionFiltersBar } from './TransactionFiltersBar'
+import { TransactionSearchResults } from './TransactionSearchResults'
+import { EMPTY_FILTERS, filterTransactions, hasActiveFilters, type TransactionFilters } from './filterTransactions'
 
 export function RegistrosPage() {
   const user = useAuthStore((state) => state.user)
@@ -20,12 +23,22 @@ export function RegistrosPage() {
   const { cards } = useCards(workspaceId ?? '')
   const { categories } = useCategories(workspaceId ?? '')
   const [selectedMonth, setSelectedMonth] = useState(currentYearMonth())
+  const [filters, setFilters] = useState<TransactionFilters>(EMPTY_FILTERS)
+
+  const accountsById = useMemo(() => new Map(accounts.map((account) => [account.id, account])), [accounts])
+  const cardsById = useMemo(() => new Map(cards.map((card) => [card.id, card])), [cards])
+  const categoriesById = useMemo(
+    () => new Map(categories.map((category) => [category.id, category])),
+    [categories],
+  )
+  const filtering = hasActiveFilters(filters)
+  const results = useMemo(
+    () =>
+      filtering ? filterTransactions(transactions, filters, selectedMonth, cardsById, categoriesById) : [],
+    [filtering, transactions, filters, selectedMonth, cardsById, categoriesById],
+  )
 
   if (!user || !workspaceId) return null
-
-  const accountsById = new Map(accounts.map((account) => [account.id, account]))
-  const cardsById = new Map(cards.map((card) => [card.id, card]))
-  const categoriesById = new Map(categories.map((category) => [category.id, category]))
 
   return (
     <div className="flex flex-col gap-6 px-6 pt-4">
@@ -69,14 +82,30 @@ export function RegistrosPage() {
         </div>
       ) : (
         <>
-          <MonthSelector value={selectedMonth} onChange={setSelectedMonth} />
-          <TransactionsGrid
-            transactions={transactions}
-            categoriesById={categoriesById}
-            accountsById={accountsById}
-            cardsById={cardsById}
-            selectedMonth={selectedMonth}
+          <TransactionFiltersBar
+            filters={filters}
+            onChange={setFilters}
+            categories={categories}
+            accounts={accounts}
+            cards={cards}
           />
+          {filters.allPeriod ? null : <MonthSelector value={selectedMonth} onChange={setSelectedMonth} />}
+          {filtering ? (
+            <TransactionSearchResults
+              results={results}
+              categoriesById={categoriesById}
+              accountsById={accountsById}
+              cardsById={cardsById}
+            />
+          ) : (
+            <TransactionsGrid
+              transactions={transactions}
+              categoriesById={categoriesById}
+              accountsById={accountsById}
+              cardsById={cardsById}
+              selectedMonth={selectedMonth}
+            />
+          )}
         </>
       )}
     </div>
