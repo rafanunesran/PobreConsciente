@@ -1,4 +1,4 @@
-import { CreditCard, Home, PiggyBank, Receipt, User, Wallet, type LucideIcon } from 'lucide-react'
+import { BarChart3, CreditCard, Home, PiggyBank, Receipt, User, Wallet, type LucideIcon } from 'lucide-react'
 
 export interface NavItem {
   to: string
@@ -21,4 +21,5 @@ export const navItems: NavItem[] = [
 // mobile), então aparecem só na Sidebar (desktop) e no Perfil (mobile).
 export const moreNavItems: NavItem[] = [
   { to: '/orcamentos', label: 'Orçamentos', icon: PiggyBank, end: false },
+  { to: '/relatorios', label: 'Relatórios', icon: BarChart3, end: false },
 ]

@@ -265,6 +265,13 @@ export const router = createBrowserRouter(
           },
         },
         {
+          path: 'relatorios',
+          lazy: async () => {
+            const { ReportsPage } = await import('./features/reports/ReportsPage')
+            return { Component: ReportsPage }
+          },
+        },
+        {
           path: 'perfil',
           lazy: async () => {
             const { PerfilPage } = await import('./features/auth/PerfilPage')
