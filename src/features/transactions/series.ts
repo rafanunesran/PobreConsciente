@@ -81,6 +81,7 @@ function siblingPayload(
     description: describeFor(sibling, data, kind),
     categoryId: data.categoryId,
     paid: sibling.paid,
+    ...(data.tags !== undefined ? { tags: data.tags } : {}),
     ...(data.accountId !== undefined ? { accountId: data.accountId } : { cardId: data.cardId }),
   }
 }
@@ -135,6 +136,7 @@ export async function updateTransactionSeries(
       description: data.description,
       categoryId: data.categoryId,
       dayOfMonth: parseDate(data.date).day,
+      ...(data.tags !== undefined ? { tags: data.tags } : {}),
       ...(data.accountId !== undefined ? { accountId: data.accountId } : { cardId: data.cardId }),
     })
   }

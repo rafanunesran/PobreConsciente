@@ -26,6 +26,7 @@ export interface RecurringRule {
   generatedUntil: string // 'YYYY-MM-DD' da última ocorrência já gerada
   accountId?: string
   cardId?: string
+  tags?: string[] // copiadas pra cada ocorrência gerada
   createdBy: string // uid de quem criou a regra — ocorrências geradas por topUp herdam este valor
 }
 
@@ -36,6 +37,7 @@ export interface RecurringRuleFormData {
   dayOfMonth: number
   accountId?: string
   cardId?: string
+  tags?: string[]
 }
 
 // NOTE: regras salvas antes da receita recorrente existir não têm `type`
@@ -50,6 +52,7 @@ const recurringRuleConverter: FirestoreDataConverter<RecurringRule> = {
       dayOfMonth: r.dayOfMonth,
       generatedUntil: r.generatedUntil,
       createdBy: r.createdBy,
+      ...(Array.isArray(r.tags) && r.tags.length > 0 ? { tags: r.tags } : {}),
     }
     return r.accountId !== undefined ? { ...base, accountId: r.accountId } : { ...base, cardId: r.cardId }
   },
@@ -57,6 +60,7 @@ const recurringRuleConverter: FirestoreDataConverter<RecurringRule> = {
     const data = snapshot.data()
     const accountId = typeof data.accountId === 'string' ? data.accountId : undefined
     const cardId = typeof data.cardId === 'string' ? data.cardId : undefined
+    const tags = Array.isArray(data.tags) ? data.tags.filter((tag): tag is string => typeof tag === 'string') : []
     return {
       id: snapshot.id,
       type: data.type === 'income' ? 'income' : 'expense',
@@ -68,6 +72,7 @@ const recurringRuleConverter: FirestoreDataConverter<RecurringRule> = {
       createdBy: typeof data.createdBy === 'string' ? data.createdBy : '',
       ...(accountId !== undefined ? { accountId } : {}),
       ...(cardId !== undefined ? { cardId } : {}),
+      ...(tags.length > 0 ? { tags } : {}),
     }
   },
 }
@@ -95,7 +100,7 @@ function firstOccurrenceDate(dayOfMonth: number, today: Date = new Date()): stri
 // esta função nunca gera doc pago, então nunca precisa tocar em saldo de
 // conta — puramente determinística, sem I/O.
 export function generateRecurringOccurrences(
-  rule: Pick<RecurringRule, 'type' | 'amount' | 'description' | 'categoryId' | 'accountId' | 'cardId' | 'dayOfMonth'>,
+  rule: Pick<RecurringRule, 'type' | 'amount' | 'description' | 'categoryId' | 'accountId' | 'cardId' | 'dayOfMonth' | 'tags'>,
   recurringRuleId: string,
   afterDate: string,
   count: number,
@@ -112,6 +117,7 @@ export function generateRecurringOccurrences(
       categoryId: rule.categoryId,
       paid: false,
       recurringRuleId,
+      ...(rule.tags !== undefined && rule.tags.length > 0 ? { tags: rule.tags } : {}),
     }
     occurrences.push(
       rule.accountId !== undefined ? { ...base, accountId: rule.accountId } : { ...base, cardId: rule.cardId },
@@ -151,6 +157,7 @@ export async function createRecurringTransaction(
     categoryId: data.categoryId,
     paid: firstOccurrencePaid,
     recurringRuleId: ruleRef.id,
+    ...(data.tags !== undefined && data.tags.length > 0 ? { tags: data.tags } : {}),
     ...(data.accountId !== undefined ? { accountId: data.accountId } : { cardId: data.cardId }),
   }
   const occurrences = [first, ...rest]
@@ -183,6 +190,7 @@ export async function createRecurringTransaction(
       dayOfMonth: data.dayOfMonth,
       generatedUntil: lastOccurrence.date,
       createdBy,
+      ...(data.tags !== undefined && data.tags.length > 0 ? { tags: data.tags } : {}),
       ...(data.accountId !== undefined ? { accountId: data.accountId } : { cardId: data.cardId }),
     })
   })
@@ -220,6 +228,7 @@ export async function updateRecurringRuleFromOccurrence(
     dayOfMonth: data.dayOfMonth,
     generatedUntil: rule.generatedUntil, // preservado: topUp continua de onde parou
     createdBy: rule.createdBy, // autoria original, nunca reescrita
+    tags: data.tags ?? rule.tags,
     ...(data.accountId !== undefined ? { accountId: data.accountId } : { cardId: data.cardId }),
   })
 }

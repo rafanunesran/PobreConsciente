@@ -31,6 +31,7 @@ const transactionConverter: FirestoreDataConverter<Transaction> = {
           }
         : {}),
       ...(t.paidTransactionIds !== undefined ? { paidTransactionIds: t.paidTransactionIds } : {}),
+      ...(Array.isArray(t.tags) && t.tags.length > 0 ? { tags: t.tags } : {}),
     }
     return t.accountId !== undefined ? { ...base, accountId: t.accountId } : { ...base, cardId: t.cardId }
   },
@@ -45,6 +46,9 @@ const transactionConverter: FirestoreDataConverter<Transaction> = {
     const paidTransactionIds = Array.isArray(data.paidTransactionIds)
       ? data.paidTransactionIds.filter((id): id is string => typeof id === 'string')
       : undefined
+    const tags = Array.isArray(data.tags)
+      ? data.tags.filter((tag): tag is string => typeof tag === 'string' && tag !== '')
+      : []
     return {
       id: snapshot.id,
       type,
@@ -67,6 +71,7 @@ const transactionConverter: FirestoreDataConverter<Transaction> = {
           }
         : {}),
       ...(paidTransactionIds !== undefined ? { paidTransactionIds } : {}),
+      ...(tags.length > 0 ? { tags } : {}),
     }
   },
 }
@@ -252,6 +257,9 @@ export async function updateTransaction(
       ...seriesFields(oldData),
       ...data,
       ...(oldData.paidTransactionIds !== undefined ? { paidTransactionIds: oldData.paidTransactionIds } : {}),
+      // Quem não conhece tags (confirmar pendente, pagamento de fatura...)
+      // não manda o campo — preserva o que já estava gravado.
+      tags: data.tags ?? oldData.tags,
     })
   })
 }

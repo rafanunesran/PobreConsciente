@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -24,6 +24,9 @@ import {
   type SeriesScope,
 } from './series'
 import { SeriesScopeDialog } from './SeriesScopeDialog'
+import { TagInput } from './TagInput'
+import { collectTags } from './tags'
+import { useTransactions } from './useTransactions'
 import type { Transaction, TransactionFormData } from './types'
 
 type Kind = 'despesa' | 'receita'
@@ -43,6 +46,8 @@ export function TransactionFormPage() {
   const { accounts } = useAccounts(workspaceId ?? '')
   const { cards } = useCards(workspaceId ?? '')
   const { categories } = useCategories(workspaceId ?? '')
+  const { transactions: allTransactions } = useTransactions(workspaceId ?? '')
+  const tagSuggestions = useMemo(() => collectTags(allTransactions), [allTransactions])
   const relevantCategories = categoryOptions(categories, isExpense ? 'expense' : 'income')
 
   const [formError, setFormError] = useState<string | null>(null)
@@ -76,6 +81,7 @@ export function TransactionFormPage() {
       recurrence: 'none',
       installmentsCount: 2,
       installmentAmountMode: 'total',
+      tags: [],
     },
   })
   const incomeForm = useForm<IncomeFormData>({
@@ -90,6 +96,7 @@ export function TransactionFormPage() {
       recurrence: 'none',
       installmentsCount: 2,
       installmentAmountMode: 'total',
+      tags: [],
     },
   })
 
@@ -126,6 +133,7 @@ export function TransactionFormPage() {
             recurrence: 'none',
             installmentsCount: 2,
             installmentAmountMode: 'total',
+            tags: transaction.tags ?? [],
           })
         } else {
           incomeForm.reset({
@@ -138,6 +146,7 @@ export function TransactionFormPage() {
             recurrence: 'none',
             installmentsCount: 2,
             installmentAmountMode: 'total',
+            tags: transaction.tags ?? [],
           })
         }
         setIsLoadingTransaction(false)
@@ -174,6 +183,7 @@ export function TransactionFormPage() {
           description: data.description,
           categoryId: data.categoryId,
           paid: data.paid,
+          tags: data.tags ?? [],
           ...linkage,
         }
         // Lançamento de série (fixo ou parcelado): antes de gravar,
@@ -192,6 +202,7 @@ export function TransactionFormPage() {
             description: data.description,
             categoryId: data.categoryId,
             dayOfMonth: Number(data.date.slice(-2)),
+            tags: data.tags ?? [],
             ...linkage,
           },
           'expense',
@@ -201,7 +212,14 @@ export function TransactionFormPage() {
       } else if (data.recurrence === 'installments') {
         await createInstallmentTransaction(
           workspaceId,
-          { amount: data.amount, description: data.description, categoryId: data.categoryId, date: data.date, ...linkage },
+          {
+            amount: data.amount,
+            description: data.description,
+            categoryId: data.categoryId,
+            date: data.date,
+            tags: data.tags ?? [],
+            ...linkage,
+          },
           'expense',
           data.installmentsCount ?? 2,
           data.installmentAmountMode === 'perInstallment',
@@ -216,6 +234,7 @@ export function TransactionFormPage() {
           description: data.description,
           categoryId: data.categoryId,
           paid: paidOnCreate,
+          tags: data.tags ?? [],
           ...linkage,
         }
         await createTransaction(workspaceId, payload, user.uid)
@@ -239,6 +258,7 @@ export function TransactionFormPage() {
           categoryId: data.categoryId,
           accountId: data.accountId,
           paid: data.paid,
+          tags: data.tags ?? [],
         }
         // Lançamento de série (fixo ou parcelado): antes de gravar,
         // pergunta o alcance — quem grava é handleScopeConfirm.
@@ -257,6 +277,7 @@ export function TransactionFormPage() {
             categoryId: data.categoryId,
             dayOfMonth: Number(data.date.slice(-2)),
             accountId: data.accountId,
+            tags: data.tags ?? [],
           },
           'income',
           data.paid,
@@ -271,6 +292,7 @@ export function TransactionFormPage() {
             categoryId: data.categoryId,
             date: data.date,
             accountId: data.accountId,
+            tags: data.tags ?? [],
           },
           'income',
           data.installmentsCount ?? 2,
@@ -287,6 +309,7 @@ export function TransactionFormPage() {
           categoryId: data.categoryId,
           accountId: data.accountId,
           paid: data.paid,
+          tags: data.tags ?? [],
         }
         await createTransaction(workspaceId, payload, user.uid)
       }
@@ -440,6 +463,11 @@ export function TransactionFormPage() {
               </option>
             ))}
           </Select>
+          <TagInput
+            value={expenseForm.watch('tags') ?? []}
+            onChange={(tags) => expenseForm.setValue('tags', tags)}
+            suggestions={tagSuggestions}
+          />
 
           <div className="flex flex-col gap-1.5">
             <span className="text-sm text-light-secondary dark:text-dark-secondary">Pago com</span>
@@ -643,6 +671,11 @@ export function TransactionFormPage() {
               </option>
             ))}
           </Select>
+          <TagInput
+            value={incomeForm.watch('tags') ?? []}
+            onChange={(tags) => incomeForm.setValue('tags', tags)}
+            suggestions={tagSuggestions}
+          />
           <Select
             label="Conta"
             error={incomeForm.formState.errors.accountId?.message}

@@ -13,6 +13,7 @@ export const expenseSchema = z
     recurrence: z.enum(['none', 'fixed', 'installments']),
     installmentsCount: z.number().int().min(2, 'Mínimo de 2 parcelas').max(48, 'Máximo de 48 parcelas').optional(),
     installmentAmountMode: z.enum(['perInstallment', 'total']).optional(),
+    tags: z.array(z.string()).optional(),
   })
   .refine((data) => (data.linkedType === 'account' ? Boolean(data.accountId) : Boolean(data.cardId)), {
     message: 'Selecione uma conta ou cartão',
@@ -36,6 +37,7 @@ export const incomeSchema = z
     recurrence: z.enum(['none', 'fixed', 'installments']),
     installmentsCount: z.number().int().min(2, 'Mínimo de 2 parcelas').max(48, 'Máximo de 48 parcelas').optional(),
     installmentAmountMode: z.enum(['perInstallment', 'total']).optional(),
+    tags: z.array(z.string()).optional(),
   })
   .refine(
     (data) => data.recurrence !== 'installments' || (data.installmentsCount ?? 0) >= 2,

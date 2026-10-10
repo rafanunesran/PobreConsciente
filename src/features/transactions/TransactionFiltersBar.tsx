@@ -14,6 +14,7 @@ interface TransactionFiltersBarProps {
   categories: Category[]
   accounts: Account[]
   cards: CreditCard[]
+  tags: string[]
 }
 
 function Segmented<T extends string>({
@@ -52,6 +53,7 @@ export function TransactionFiltersBar({
   categories,
   accounts,
   cards,
+  tags,
 }: TransactionFiltersBarProps) {
   const [open, setOpen] = useState(false)
   const active = hasActiveFilters(filters)
@@ -66,7 +68,7 @@ export function TransactionFiltersBar({
             type="search"
             value={filters.text}
             onChange={(e) => onChange({ ...filters, text: e.target.value })}
-            placeholder="Buscar por descrição ou categoria"
+            placeholder="Buscar por descrição, categoria ou tag"
             aria-label="Buscar lançamentos"
             className="w-full min-w-0 bg-transparent text-base text-light-primary outline-none placeholder:text-light-secondary dark:text-dark-primary dark:placeholder:text-dark-secondary"
           />
@@ -144,6 +146,20 @@ export function TransactionFiltersBar({
               </optgroup>
             ) : null}
           </Select>
+          {tags.length > 0 ? (
+            <Select
+              label="Tag"
+              value={filters.tag}
+              onChange={(e) => onChange({ ...filters, tag: e.target.value })}
+            >
+              <option value="">Qualquer</option>
+              {tags.map((tag) => (
+                <option key={tag} value={tag}>
+                  #{tag}
+                </option>
+              ))}
+            </Select>
+          ) : null}
           <label className="flex items-center gap-2 text-sm text-light-primary dark:text-dark-primary">
             <input
               type="checkbox"

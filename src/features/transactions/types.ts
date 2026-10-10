@@ -20,6 +20,7 @@ export interface Transaction {
   // Se esta transação for editada de volta pra não-paga (ou apagada), essas
   // voltam a não-pagas junto — ver updateTransaction/deleteTransaction.
   paidTransactionIds?: string[]
+  tags?: string[] // marcadores livres (ex: "viagem", "reforma"), já normalizados — ver tags.ts
   createdBy: string // uid de quem criou — nunca alterado em updates
 }
 
@@ -36,4 +37,7 @@ export interface TransactionFormData {
   installmentGroupId?: string
   installmentIndex?: number
   installmentTotal?: number
+  // undefined = "não mexer" (updateTransaction preserva as tags gravadas);
+  // [] = remover todas. Só o form de lançamento manda esse campo.
+  tags?: string[]
 }

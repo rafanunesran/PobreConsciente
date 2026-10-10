@@ -107,6 +107,7 @@ service cloud.firestore {
         && request.resource.data.description is string
         && request.resource.data.categoryId is string
         && request.resource.data.paid is bool
+        && (!request.resource.data.keys().hasAny(['tags']) || (request.resource.data.tags is list && request.resource.data.tags.size() <= 5))
         && (
           (request.resource.data.keys().hasAny(['accountId']) && !request.resource.data.keys().hasAny(['cardId']))
           || (request.resource.data.keys().hasAny(['cardId']) && !request.resource.data.keys().hasAny(['accountId']))
@@ -123,6 +124,7 @@ service cloud.firestore {
         && request.resource.data.dayOfMonth is number
         && request.resource.data.dayOfMonth >= 1 && request.resource.data.dayOfMonth <= 31
         && request.resource.data.generatedUntil is string
+        && (!request.resource.data.keys().hasAny(['tags']) || (request.resource.data.tags is list && request.resource.data.tags.size() <= 5))
         && (
           (request.resource.data.keys().hasAny(['accountId']) && !request.resource.data.keys().hasAny(['cardId']))
           || (request.resource.data.keys().hasAny(['cardId']) && !request.resource.data.keys().hasAny(['accountId']))

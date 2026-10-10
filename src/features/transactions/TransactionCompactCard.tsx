@@ -64,6 +64,11 @@ export function TransactionCompactCard({
           {linkedName ? ` · ${linkedName}` : ''}
           {authorName ? ` · ${authorName}` : ''}
         </p>
+        {transaction.tags && transaction.tags.length > 0 ? (
+          <p className="truncate text-xs text-brand-500">
+            {transaction.tags.map((tag) => `#${tag}`).join(' ')}
+          </p>
+        ) : null}
         <p
           className={cn(
             'text-sm font-semibold',

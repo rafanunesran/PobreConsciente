@@ -13,6 +13,7 @@ import { currentYearMonth } from './dateUtils'
 import { Button } from '../../components/ui/Button'
 import { TransactionFiltersBar } from './TransactionFiltersBar'
 import { TransactionSearchResults } from './TransactionSearchResults'
+import { collectTags } from './tags'
 import { EMPTY_FILTERS, filterTransactions, hasActiveFilters, type TransactionFilters } from './filterTransactions'
 
 export function RegistrosPage() {
@@ -31,6 +32,7 @@ export function RegistrosPage() {
     () => new Map(categories.map((category) => [category.id, category])),
     [categories],
   )
+  const tags = useMemo(() => collectTags(transactions), [transactions])
   const filtering = hasActiveFilters(filters)
   const results = useMemo(
     () =>
@@ -88,6 +90,7 @@ export function RegistrosPage() {
             categories={categories}
             accounts={accounts}
             cards={cards}
+            tags={tags}
           />
           {filters.allPeriod ? null : <MonthSelector value={selectedMonth} onChange={setSelectedMonth} />}
           {filtering ? (

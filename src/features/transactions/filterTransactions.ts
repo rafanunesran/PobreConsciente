@@ -11,6 +11,7 @@ export interface TransactionFilters {
   // 'account:<id>' | 'card:<id>' | '' (todas) — um select só pros dois
   // tipos de vínculo, mesma ideia do "Pago com" do form de despesa.
   linked: string
+  tag: string // '' = qualquer
   status: 'all' | 'paid' | 'pending'
   allPeriod: boolean // false = só o mês selecionado na tela
 }
@@ -20,6 +21,7 @@ export const EMPTY_FILTERS: TransactionFilters = {
   type: 'all',
   categoryId: '',
   linked: '',
+  tag: '',
   status: 'all',
   allPeriod: false,
 }
@@ -32,6 +34,7 @@ export function hasActiveFilters(filters: TransactionFilters): boolean {
     filters.type !== 'all' ||
     filters.categoryId !== '' ||
     filters.linked !== '' ||
+    filters.tag !== '' ||
     filters.status !== 'all' ||
     filters.allPeriod
   )
@@ -67,11 +70,12 @@ export function filterTransactions(
     if (categoryIds !== null && !categoryIds.has(t.categoryId)) return false
     if (linkedKind === 'account' && t.accountId !== linkedId) return false
     if (linkedKind === 'card' && t.cardId !== linkedId) return false
+    if (filters.tag !== '' && !(t.tags ?? []).includes(filters.tag)) return false
     if (filters.status === 'paid' && !t.paid) return false
     if (filters.status === 'pending' && t.paid) return false
     if (text !== '') {
       const categoryName = categoriesById.get(t.categoryId)?.name ?? ''
-      const haystack = normalizeSearch(`${t.description} ${categoryName}`)
+      const haystack = normalizeSearch(`${t.description} ${categoryName} ${(t.tags ?? []).join(' ')}`)
       if (!haystack.includes(text)) return false
     }
     return true
