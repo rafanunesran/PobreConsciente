@@ -123,6 +123,7 @@ export function RegistrosPage() {
             />
           ) : (
             <TransactionsGrid
+              workspaceId={workspaceId}
               transactions={transactions}
               categoriesById={categoriesById}
               accountsById={accountsById}

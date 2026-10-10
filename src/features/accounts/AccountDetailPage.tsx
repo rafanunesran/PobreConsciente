@@ -134,6 +134,7 @@ export function AccountDetailPage() {
           <div className="flex flex-col gap-4 lg:w-2/3">
             <MonthSelector value={selectedMonth} onChange={setSelectedMonth} />
             <TransactionsGrid
+              workspaceId={workspaceId ?? ''}
               transactions={accountTransactions}
               categoriesById={categoriesById}
               accountsById={accountsById}
