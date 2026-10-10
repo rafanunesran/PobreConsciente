@@ -25,7 +25,7 @@ export function CaixinhaFormPage() {
 
   const form = useForm<CaixinhaFormData>({
     resolver: zodResolver(caixinhaSchema),
-    defaultValues: { name: '', yieldLabel: '' },
+    defaultValues: { name: '', yieldLabel: '', goalAmount: undefined, goalDate: '' },
   })
 
   useEffect(() => {
@@ -38,7 +38,12 @@ export function CaixinhaFormPage() {
           navigate(`/contas/${accountId ?? ''}`, { replace: true })
           return
         }
-        form.reset({ name: caixinha.name, yieldLabel: caixinha.yieldLabel ?? '' })
+        form.reset({
+          name: caixinha.name,
+          yieldLabel: caixinha.yieldLabel ?? '',
+          goalAmount: caixinha.goalAmount,
+          goalDate: caixinha.goalDate ?? '',
+        })
         setIsLoadingCaixinha(false)
       })
       .catch(() => {
@@ -120,6 +125,22 @@ export function CaixinhaFormPage() {
           placeholder="Ex: 110% do CDI"
           error={form.formState.errors.yieldLabel?.message}
           {...form.register('yieldLabel')}
+        />
+        <Input
+          label="Meta de valor (opcional)"
+          type="number"
+          step="0.01"
+          placeholder="Ex: 10000"
+          error={form.formState.errors.goalAmount?.message}
+          {...form.register('goalAmount', {
+            setValueAs: (value: unknown) => (value === '' || value === null || value === undefined ? undefined : Number(value)),
+          })}
+        />
+        <Input
+          label="Prazo da meta (opcional)"
+          type="date"
+          error={form.formState.errors.goalDate?.message}
+          {...form.register('goalDate')}
         />
 
         {formError ? <p className="text-sm text-danger">{formError}</p> : null}

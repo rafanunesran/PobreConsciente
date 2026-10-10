@@ -6,6 +6,7 @@ import { formatBRL } from '../../lib/utils'
 import { useWorkspaceStore } from '../../stores/workspaceStore'
 import { useUserProfiles } from '../family/useUserProfiles'
 import type { Caixinha } from './types'
+import { CaixinhaGoalBar } from './CaixinhaGoalBar'
 
 interface CaixinhaCardProps {
   caixinha: Caixinha
@@ -92,6 +93,7 @@ export function CaixinhaCard({ caixinha, accountId }: CaixinhaCardProps) {
           {caixinha.yieldLabel ? (
             <p className="text-xs text-light-secondary dark:text-dark-secondary">{caixinha.yieldLabel}</p>
           ) : null}
+          <CaixinhaGoalBar caixinha={caixinha} />
           {authorName ? (
             <p className="text-xs text-light-secondary dark:text-dark-secondary">
               Adicionado por {authorName}

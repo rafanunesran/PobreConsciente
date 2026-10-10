@@ -49,6 +49,8 @@ service cloud.firestore {
         && request.resource.data.name is string
         && request.resource.data.name.size() > 0 && request.resource.data.name.size() <= 40
         && request.resource.data.balance is number
+        && (!request.resource.data.keys().hasAny(['goalAmount']) || (request.resource.data.goalAmount is number && request.resource.data.goalAmount > 0))
+        && (!request.resource.data.keys().hasAny(['goalDate']) || request.resource.data.goalDate is string)
         && hasValidCreatedBy();
     }
 
