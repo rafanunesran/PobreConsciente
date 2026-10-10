@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom'
-import { Settings } from 'lucide-react'
+import { ArrowLeftRight, Settings } from 'lucide-react'
 import { ACCOUNT_TYPE_LABELS, type Account } from './types'
 import { Card } from '../../components/ui/Card'
 import { formatBRL } from '../../lib/utils'
@@ -8,9 +8,10 @@ import { useUserProfiles } from '../family/useUserProfiles'
 
 interface AccountTileProps {
   account: Account
+  onTransfer: (account: Account) => void
 }
 
-export function AccountTile({ account }: AccountTileProps) {
+export function AccountTile({ account, onTransfer }: AccountTileProps) {
   const family = useWorkspaceStore((state) => state.family)
   const profiles = useUserProfiles(family ? [account.createdBy] : [])
   const authorName = family ? profiles.get(account.createdBy)?.displayName : undefined
@@ -24,6 +25,15 @@ export function AccountTile({ account }: AccountTileProps) {
       >
         <Settings size={16} />
       </Link>
+      <button
+        type="button"
+        aria-label="Transferir"
+        title="Transferir"
+        onClick={() => onTransfer(account)}
+        className="absolute right-3 top-11 z-10 flex h-8 w-8 items-center justify-center rounded-full text-light-secondary transition-colors duration-200 hover:text-light-primary dark:text-dark-secondary dark:hover:text-dark-primary"
+      >
+        <ArrowLeftRight size={16} />
+      </button>
       <Link to={`/contas/${account.id}`} className="block">
         <Card className="transition-all duration-200 hover:border-brand-500">
           <p className="text-sm text-light-secondary dark:text-dark-secondary">

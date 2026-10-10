@@ -1,9 +1,12 @@
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Plus, Wallet } from 'lucide-react'
 import { useAuthStore } from '../../stores/authStore'
 import { useWorkspaceStore } from '../../stores/workspaceStore'
 import { useAccounts } from './useAccounts'
 import { AccountTile } from './AccountTile'
+import { QuickTransferDialog } from './QuickTransferDialog'
+import type { Account } from './types'
 import { Button } from '../../components/ui/Button'
 
 export function AccountsPage() {
@@ -13,6 +16,7 @@ export function AccountsPage() {
   // uid vazio se `user`/workspace ainda não resolveu, e só corta a
   // renderização depois.
   const { accounts, loading, error } = useAccounts(workspaceId ?? '')
+  const [transferFrom, setTransferFrom] = useState<Account | null>(null)
 
   // Só renderiza atrás de <ProtectedRoute>, `user` nunca deveria ser null
   // aqui de verdade — o guard é só pro TS não reclamar.
@@ -61,10 +65,19 @@ export function AccountsPage() {
       ) : (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {accounts.map((account) => (
-            <AccountTile key={account.id} account={account} />
+            <AccountTile key={account.id} account={account} onTransfer={setTransferFrom} />
           ))}
         </div>
       )}
+
+      {transferFrom ? (
+        <QuickTransferDialog
+          workspaceId={workspaceId}
+          from={accounts.find((a) => a.id === transferFrom.id) ?? transferFrom}
+          accounts={accounts}
+          onClose={() => setTransferFrom(null)}
+        />
+      ) : null}
     </div>
   )
 }
