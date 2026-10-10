@@ -3,6 +3,7 @@ import {
   collection,
   deleteDoc,
   doc,
+  deleteField,
   getDoc,
   runTransaction,
   updateDoc,
@@ -24,10 +25,14 @@ const caixinhaConverter: FirestoreDataConverter<Caixinha> = {
     balance: caixinha.balance,
     createdBy: caixinha.createdBy,
     ...(caixinha.yieldLabel !== undefined ? { yieldLabel: caixinha.yieldLabel } : {}),
+    ...(caixinha.goalAmount !== undefined ? { goalAmount: caixinha.goalAmount } : {}),
+    ...(caixinha.goalDate !== undefined ? { goalDate: caixinha.goalDate } : {}),
   }),
   fromFirestore: (snapshot: QueryDocumentSnapshot) => {
     const data = snapshot.data()
     const yieldLabel = typeof data.yieldLabel === 'string' ? data.yieldLabel : undefined
+    const goalAmount = typeof data.goalAmount === 'number' && data.goalAmount > 0 ? data.goalAmount : undefined
+    const goalDate = typeof data.goalDate === 'string' && data.goalDate !== '' ? data.goalDate : undefined
     return {
       id: snapshot.id,
       accountId: typeof data.accountId === 'string' ? data.accountId : '',
@@ -35,6 +40,8 @@ const caixinhaConverter: FirestoreDataConverter<Caixinha> = {
       balance: typeof data.balance === 'number' ? data.balance : 0,
       createdBy: typeof data.createdBy === 'string' ? data.createdBy : '',
       ...(yieldLabel !== undefined ? { yieldLabel } : {}),
+      ...(goalAmount !== undefined ? { goalAmount } : {}),
+      ...(goalDate !== undefined ? { goalDate } : {}),
     }
   },
 }
@@ -62,6 +69,8 @@ export async function createCaixinha(
     // string vazia (campo deixado em branco no form) vira "ausente" —
     // não persiste um yieldLabel sem conteúdo.
     ...(data.yieldLabel ? { yieldLabel: data.yieldLabel } : {}),
+    ...(data.goalAmount !== undefined ? { goalAmount: data.goalAmount } : {}),
+    ...(data.goalDate ? { goalDate: data.goalDate } : {}),
   })
   return ref.id
 }
@@ -74,7 +83,14 @@ export async function updateCaixinha(
   caixinhaId: string,
   data: CaixinhaFormData,
 ): Promise<void> {
-  await updateDoc(caixinhaDoc(uid, caixinhaId), data)
+  // Meta apagada no form precisa SUMIR do doc — updateDoc com undefined
+  // é erro no Firestore, daí o deleteField() explícito.
+  await updateDoc(caixinhaDoc(uid, caixinhaId), {
+    name: data.name,
+    yieldLabel: data.yieldLabel ?? '',
+    goalAmount: data.goalAmount ?? deleteField(),
+    goalDate: data.goalDate ? data.goalDate : deleteField(),
+  })
 }
 
 export async function deleteCaixinha(uid: string, caixinhaId: string): Promise<void> {

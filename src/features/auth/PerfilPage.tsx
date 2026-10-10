@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { signOut } from 'firebase/auth'
-import { LogOut, Moon, Sun, Tag, Trash2, Users } from 'lucide-react'
+import { Bell, BellOff, Download, LogOut, Moon, Sun, Tag, Trash2, Users } from 'lucide-react'
 import { auth } from '../../lib/firebase'
 import { useAuthStore } from '../../stores/authStore'
 import { useThemeStore } from '../../stores/themeStore'
@@ -10,6 +10,14 @@ import { Avatar } from '../../components/ui/Avatar'
 import { Button } from '../../components/ui/Button'
 import { Input } from '../../components/ui/Input'
 import { resetUserData } from './resetUserData'
+import { moreNavItems } from '../../components/layout/navItems'
+import { exportAllTransactionsCsv } from '../transactions/exportAll'
+import {
+  billRemindersEnabled,
+  disableBillReminders,
+  enableBillReminders,
+  notificationsSupported,
+} from '../reminders/billNotifications'
 
 const RESET_CONFIRM_WORD = 'ZERAR'
 
@@ -25,10 +33,43 @@ export function PerfilPage() {
   const [confirmText, setConfirmText] = useState('')
   const [isResetting, setIsResetting] = useState(false)
   const [resetError, setResetError] = useState<string | null>(null)
+  const [isExporting, setIsExporting] = useState(false)
+  const [exportError, setExportError] = useState<string | null>(null)
+  const [remindersOn, setRemindersOn] = useState(billRemindersEnabled)
+  const [remindersMessage, setRemindersMessage] = useState<string | null>(null)
 
   // NOTE: PerfilPage só é renderizada atrás de <ProtectedRoute>, então
   // `user` nunca deveria ser null aqui — o guard é só pro TS não reclamar.
   if (!user) return null
+
+  async function handleExport() {
+    if (!workspaceId) return
+    setIsExporting(true)
+    setExportError(null)
+    try {
+      await exportAllTransactionsCsv(workspaceId)
+    } catch {
+      setExportError('Não foi possível exportar. Tente novamente.')
+    } finally {
+      setIsExporting(false)
+    }
+  }
+
+  async function toggleReminders() {
+    setRemindersMessage(null)
+    if (remindersOn) {
+      disableBillReminders()
+      setRemindersOn(false)
+      return
+    }
+    const ok = await enableBillReminders()
+    setRemindersOn(ok)
+    setRemindersMessage(
+      ok
+        ? 'Pronto! Ao abrir o app você recebe um aviso das contas vencidas ou vencendo em até 2 dias.'
+        : 'O navegador bloqueou as notificações. Libere nas configurações do site e tente de novo.',
+    )
+  }
 
   async function handleReset() {
     if (!user || !workspaceId) return
@@ -59,6 +100,15 @@ export function PerfilPage() {
       </div>
 
       <div className="flex w-full max-w-xs flex-col gap-3">
+        {moreNavItems.map(({ to, label, icon: Icon }) => (
+          <Link key={to} to={to}>
+            <Button variant="secondary" className="w-full">
+              <Icon size={20} />
+              {label}
+            </Button>
+          </Link>
+        ))}
+
         <Link to="/categorias">
           <Button variant="secondary" className="w-full">
             <Tag size={20} />
@@ -72,6 +122,24 @@ export function PerfilPage() {
             Família
           </Button>
         </Link>
+
+        <Button variant="secondary" onClick={handleExport} disabled={isExporting}>
+          <Download size={20} />
+          {isExporting ? 'Exportando...' : 'Exportar lançamentos (CSV)'}
+        </Button>
+        {exportError ? <p className="text-center text-sm text-danger">{exportError}</p> : null}
+
+        {notificationsSupported() ? (
+          <>
+            <Button variant="secondary" onClick={toggleReminders}>
+              {remindersOn ? <BellOff size={20} /> : <Bell size={20} />}
+              {remindersOn ? 'Desativar avisos de vencimento' : 'Avisar vencimentos'}
+            </Button>
+            {remindersMessage ? (
+              <p className="text-center text-xs text-light-secondary dark:text-dark-secondary">{remindersMessage}</p>
+            ) : null}
+          </>
+        ) : null}
 
         <Button variant="secondary" onClick={toggleTheme}>
           {theme === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
@@ -88,7 +156,7 @@ export function PerfilPage() {
         {confirmingReset ? (
           <div className="flex flex-col gap-3">
             <p className="text-sm text-danger">
-              Isso apaga TODOS os dados (contas, cartões, categorias, transações e caixinhas)
+              Isso apaga TODOS os dados (contas, cartões, categorias, transações, caixinhas, orçamentos e comprovantes)
               para sempre. Não pode ser desfeito.
               {family
                 ? ` Isso afeta TODOS os ${family.memberIds.length} membros da família, não só você.`

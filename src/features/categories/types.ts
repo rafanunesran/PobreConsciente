@@ -71,6 +71,10 @@ export interface Category {
   type: CategoryType
   icon: CategoryIcon
   color: CategoryColor
+  // presente sse é subcategoria — só um nível (subcategoria não tem filhas).
+  // Se a mãe for excluída, a filha passa a ser tratada como categoria
+  // principal (ver categoryTree.ts), sem precisar regravar nada.
+  parentId?: string
   createdBy: string // uid de quem criou — nunca alterado em updates
 }
 

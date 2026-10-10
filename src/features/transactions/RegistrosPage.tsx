@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Plus, Receipt } from 'lucide-react'
+import { Download, Plus, Receipt } from 'lucide-react'
 import { useAuthStore } from '../../stores/authStore'
 import { useWorkspaceStore } from '../../stores/workspaceStore'
 import { useTransactions } from './useTransactions'
@@ -11,6 +11,12 @@ import { TransactionsGrid } from './TransactionsGrid'
 import { MonthSelector } from '../../components/ui/MonthSelector'
 import { currentYearMonth } from './dateUtils'
 import { Button } from '../../components/ui/Button'
+import { TransactionFiltersBar } from './TransactionFiltersBar'
+import { TransactionSearchResults } from './TransactionSearchResults'
+import { collectTags } from './tags'
+import { downloadCsv, transactionsToCsv } from './exportCsv'
+import { effectiveMonth } from '../cards/invoiceUtils'
+import { EMPTY_FILTERS, filterTransactions, hasActiveFilters, type TransactionFilters } from './filterTransactions'
 
 export function RegistrosPage() {
   const user = useAuthStore((state) => state.user)
@@ -20,12 +26,34 @@ export function RegistrosPage() {
   const { cards } = useCards(workspaceId ?? '')
   const { categories } = useCategories(workspaceId ?? '')
   const [selectedMonth, setSelectedMonth] = useState(currentYearMonth())
+  const [filters, setFilters] = useState<TransactionFilters>(EMPTY_FILTERS)
+
+  const accountsById = useMemo(() => new Map(accounts.map((account) => [account.id, account])), [accounts])
+  const cardsById = useMemo(() => new Map(cards.map((card) => [card.id, card])), [cards])
+  const categoriesById = useMemo(
+    () => new Map(categories.map((category) => [category.id, category])),
+    [categories],
+  )
+  const tags = useMemo(() => collectTags(transactions), [transactions])
+  const filtering = hasActiveFilters(filters)
+  const results = useMemo(
+    () =>
+      filtering ? filterTransactions(transactions, filters, selectedMonth, cardsById, categoriesById) : [],
+    [filtering, transactions, filters, selectedMonth, cardsById, categoriesById],
+  )
 
   if (!user || !workspaceId) return null
 
-  const accountsById = new Map(accounts.map((account) => [account.id, account]))
-  const cardsById = new Map(cards.map((card) => [card.id, card]))
-  const categoriesById = new Map(categories.map((category) => [category.id, category]))
+  // Exporta o que está na tela: o resultado da busca, ou o mês inteiro
+  // lançamento a lançamento (compras de cartão individuais incluídas).
+  function handleExport() {
+    const rows = filtering ? results : transactions.filter((t) => effectiveMonth(t, cardsById) === selectedMonth)
+    const suffix = filtering ? (filters.allPeriod ? 'busca' : `${selectedMonth}-busca`) : selectedMonth
+    downloadCsv(
+      `pobreconsciente-extrato-${suffix}.csv`,
+      transactionsToCsv(rows, { categoriesById, accountsById, cardsById }),
+    )
+  }
 
   return (
     <div className="flex flex-col gap-6 px-6 pt-4">
@@ -33,12 +61,20 @@ export function RegistrosPage() {
         <h1 className="text-xl font-semibold text-light-primary dark:text-dark-primary">
           Registros
         </h1>
-        <Link to="/registros/novo">
-          <Button type="button" className="gap-1.5">
-            <Plus size={18} />
-            Novo
-          </Button>
-        </Link>
+        <div className="flex gap-2">
+          {transactions.length > 0 ? (
+            <Button type="button" variant="secondary" className="gap-1.5" onClick={handleExport} aria-label="Exportar CSV">
+              <Download size={18} />
+              <span className="hidden sm:inline">Exportar</span>
+            </Button>
+          ) : null}
+          <Link to="/registros/novo">
+            <Button type="button" className="gap-1.5">
+              <Plus size={18} />
+              Novo
+            </Button>
+          </Link>
+        </div>
       </div>
 
       {loading ? (
@@ -69,14 +105,31 @@ export function RegistrosPage() {
         </div>
       ) : (
         <>
-          <MonthSelector value={selectedMonth} onChange={setSelectedMonth} />
-          <TransactionsGrid
-            transactions={transactions}
-            categoriesById={categoriesById}
-            accountsById={accountsById}
-            cardsById={cardsById}
-            selectedMonth={selectedMonth}
+          <TransactionFiltersBar
+            filters={filters}
+            onChange={setFilters}
+            categories={categories}
+            accounts={accounts}
+            cards={cards}
+            tags={tags}
           />
+          {filters.allPeriod ? null : <MonthSelector value={selectedMonth} onChange={setSelectedMonth} />}
+          {filtering ? (
+            <TransactionSearchResults
+              results={results}
+              categoriesById={categoriesById}
+              accountsById={accountsById}
+              cardsById={cardsById}
+            />
+          ) : (
+            <TransactionsGrid
+              transactions={transactions}
+              categoriesById={categoriesById}
+              accountsById={accountsById}
+              cardsById={cardsById}
+              selectedMonth={selectedMonth}
+            />
+          )}
         </>
       )}
     </div>

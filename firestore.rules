@@ -49,6 +49,8 @@ service cloud.firestore {
         && request.resource.data.name is string
         && request.resource.data.name.size() > 0 && request.resource.data.name.size() <= 40
         && request.resource.data.balance is number
+        && (!request.resource.data.keys().hasAny(['goalAmount']) || (request.resource.data.goalAmount is number && request.resource.data.goalAmount > 0))
+        && (!request.resource.data.keys().hasAny(['goalDate']) || request.resource.data.goalDate is string)
         && hasValidCreatedBy();
     }
 
@@ -84,6 +86,15 @@ service cloud.firestore {
         && request.resource.data.type in ['expense', 'income']
         && request.resource.data.icon is string
         && request.resource.data.color is string
+        && (!request.resource.data.keys().hasAny(['parentId']) || request.resource.data.parentId is string)
+        && hasValidCreatedBy();
+    }
+
+    match /users/{userId}/budgets/{budgetId} {
+      allow read, delete: if request.auth != null && isWorkspaceMember(userId);
+      allow create, update: if request.auth != null && isWorkspaceMember(userId)
+        && request.resource.data.categoryId is string
+        && request.resource.data.amount is number && request.resource.data.amount > 0
         && hasValidCreatedBy();
     }
 
@@ -96,10 +107,25 @@ service cloud.firestore {
         && request.resource.data.description is string
         && request.resource.data.categoryId is string
         && request.resource.data.paid is bool
+        && (!request.resource.data.keys().hasAny(['tags']) || (request.resource.data.tags is list && request.resource.data.tags.size() <= 5))
         && (
           (request.resource.data.keys().hasAny(['accountId']) && !request.resource.data.keys().hasAny(['cardId']))
           || (request.resource.data.keys().hasAny(['cardId']) && !request.resource.data.keys().hasAny(['accountId']))
         )
+        && hasValidCreatedBy();
+    }
+
+    // Comprovante guardado como data URL dentro do próprio documento (sem
+    // Firebase Storage) — o teto de tamanho protege o limite de 1 MiB do doc.
+    // Sem update: comprovante só é criado ou apagado.
+    match /users/{userId}/attachments/{attachmentId} {
+      allow read, delete: if request.auth != null && isWorkspaceMember(userId);
+      allow create: if request.auth != null && isWorkspaceMember(userId)
+        && request.resource.data.transactionId is string
+        && request.resource.data.name is string
+        && request.resource.data.mimeType in ['image/jpeg', 'application/pdf']
+        && request.resource.data.dataUrl is string
+        && request.resource.data.dataUrl.size() <= 900000
         && hasValidCreatedBy();
     }
 
@@ -112,6 +138,7 @@ service cloud.firestore {
         && request.resource.data.dayOfMonth is number
         && request.resource.data.dayOfMonth >= 1 && request.resource.data.dayOfMonth <= 31
         && request.resource.data.generatedUntil is string
+        && (!request.resource.data.keys().hasAny(['tags']) || (request.resource.data.tags is list && request.resource.data.tags.size() <= 5))
         && (
           (request.resource.data.keys().hasAny(['accountId']) && !request.resource.data.keys().hasAny(['cardId']))
           || (request.resource.data.keys().hasAny(['cardId']) && !request.resource.data.keys().hasAny(['accountId']))

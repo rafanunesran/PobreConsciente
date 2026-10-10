@@ -1,6 +1,6 @@
 import { NavLink } from 'react-router-dom'
 import { cn } from '../../lib/utils'
-import { navItems } from './navItems'
+import { moreNavItems, navItems } from './navItems'
 
 export function Sidebar() {
   return (
@@ -8,7 +8,7 @@ export function Sidebar() {
       <p className="text-xl font-semibold text-brand-500">Pobre Consciente</p>
 
       <nav className="mt-8 flex flex-col gap-1">
-        {navItems.map(({ to, label, icon: Icon, end }) => (
+        {[...navItems, ...moreNavItems].map(({ to, label, icon: Icon, end }) => (
           <NavLink
             key={to}
             to={to}

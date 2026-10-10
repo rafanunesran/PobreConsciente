@@ -12,6 +12,9 @@ import { InvoicesSummaryCard } from '../cards/InvoicesSummaryCard'
 import { computeInvoiceMonth } from '../cards/invoiceUtils'
 import { useCategories } from '../categories/useCategories'
 import { CategorySpendingCard } from '../categories/CategorySpendingCard'
+import { useBudgets } from '../budgets/useBudgets'
+import { BudgetsSummaryCard } from '../budgets/BudgetsSummaryCard'
+import { UpcomingBillsCard } from '../reminders/UpcomingBillsCard'
 import { MonthSelector } from '../../components/ui/MonthSelector'
 import { formatBRL } from '../../lib/utils'
 
@@ -29,6 +32,7 @@ export function HomePage() {
   const { transactions } = useTransactions(workspaceId ?? '')
   const { cards } = useCards(workspaceId ?? '')
   const { categories } = useCategories(workspaceId ?? '')
+  const { budgets } = useBudgets(workspaceId ?? '')
   const [selectedMonth, setSelectedMonth] = useState(currentYearMonth())
   const [invoiceOffset, setInvoiceOffset] = useState(-1)
 
@@ -70,6 +74,8 @@ export function HomePage() {
         ))}
       </section>
 
+      <UpcomingBillsCard transactions={transactions} cards={cards} />
+
       <MonthSelector value={selectedMonth} onChange={setSelectedMonth} />
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -78,6 +84,14 @@ export function HomePage() {
       </div>
 
       <CategorySpendingCard
+        transactions={transactions}
+        categories={categories}
+        cardsById={cardsById}
+        selectedMonth={selectedMonth}
+      />
+
+      <BudgetsSummaryCard
+        budgets={budgets}
         transactions={transactions}
         categories={categories}
         cardsById={cardsById}

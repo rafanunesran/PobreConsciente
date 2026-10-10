@@ -9,6 +9,7 @@ import { useAuthStore } from '../../stores/authStore'
 import { useWorkspaceStore, syncWorkspace } from '../../stores/workspaceStore'
 import { upsertMyProfile } from '../../features/family/userProfiles'
 import { topUpRecurringRules } from '../../features/transactions/recurring'
+import { notifyUpcomingBills } from '../../features/reminders/billNotifications'
 
 // NOTE: abaixo de `lg`, comportamento igual ao original (coluna única de
 // 480px, bottom nav). Em `lg+`, a Sidebar substitui a bottom nav e a coluna
@@ -43,6 +44,12 @@ export function AppShell() {
   // devo operar no namespace de uma família.
   useEffect(() => {
     if (workspaceId && !workspaceLoading) void topUpRecurringRules(workspaceId)
+  }, [workspaceId, workspaceLoading])
+
+  // Aviso de contas vencendo (se a pessoa ativou no Perfil) — no máximo
+  // uma vez por dia, silencioso se falhar.
+  useEffect(() => {
+    if (workspaceId && !workspaceLoading) notifyUpcomingBills(workspaceId).catch(() => undefined)
   }, [workspaceId, workspaceLoading])
 
   // Essencial: as páginas abaixo (Outlet) usam `workspaceId` direto como

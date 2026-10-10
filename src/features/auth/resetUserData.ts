@@ -11,6 +11,8 @@ const USER_COLLECTIONS = [
   'recurringRules',
   'caixinhas',
   'caixinhaMovements',
+  'budgets',
+  'attachments',
 ] as const
 
 // Firestore só aceita até 500 operações por writeBatch.

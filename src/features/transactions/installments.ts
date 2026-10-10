@@ -12,6 +12,7 @@ export interface InstallmentFormData {
   date: string
   accountId?: string
   cardId?: string
+  tags?: string[]
 }
 
 // Cria `installments` documentos mensais a partir de `data.date`. Se
@@ -64,6 +65,7 @@ export async function createInstallmentTransaction(
       installmentGroupId: groupId,
       installmentIndex: index,
       installmentTotal: installments,
+      ...(data.tags !== undefined && data.tags.length > 0 ? { tags: data.tags } : {}),
     }
     occurrences.push(
       data.accountId !== undefined ? { ...base, accountId: data.accountId } : { ...base, cardId: data.cardId },

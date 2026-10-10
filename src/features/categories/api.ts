@@ -2,6 +2,7 @@ import {
   addDoc,
   collection,
   deleteDoc,
+  deleteField,
   doc,
   getDoc,
   updateDoc,
@@ -19,12 +20,14 @@ const categoryConverter: FirestoreDataConverter<Category> = {
     icon: category.icon,
     color: category.color,
     createdBy: category.createdBy,
+    ...(category.parentId ? { parentId: category.parentId } : {}),
   }),
   fromFirestore: (snapshot: QueryDocumentSnapshot) => {
     const data = snapshot.data()
     const type: CategoryType = CATEGORY_TYPES.includes(data.type) ? data.type : 'expense'
     const icon: CategoryIcon = CATEGORY_ICONS.includes(data.icon) ? data.icon : 'more'
     const color: CategoryColor = CATEGORY_COLORS.includes(data.color) ? data.color : '#10B981'
+    const parentId = typeof data.parentId === 'string' && data.parentId !== '' ? data.parentId : undefined
     return {
       id: snapshot.id,
       name: typeof data.name === 'string' ? data.name : '',
@@ -32,6 +35,7 @@ const categoryConverter: FirestoreDataConverter<Category> = {
       icon,
       color,
       createdBy: typeof data.createdBy === 'string' ? data.createdBy : '',
+      ...(parentId !== undefined ? { parentId } : {}),
     }
   },
 }
@@ -49,7 +53,13 @@ export async function createCategory(
   data: CategoryFormData,
   createdBy: string,
 ): Promise<string> {
-  const ref = await addDoc(categoriesCollection(uid), { id: '', createdBy, ...data })
+  const { parentId, ...rest } = data
+  const ref = await addDoc(categoriesCollection(uid), {
+    id: '',
+    createdBy,
+    ...rest,
+    ...(parentId ? { parentId } : {}),
+  })
   return ref.id
 }
 
@@ -58,7 +68,10 @@ export async function updateCategory(
   categoryId: string,
   data: CategoryFormData,
 ): Promise<void> {
-  await updateDoc(categoryDoc(uid, categoryId), data)
+  // Virar categoria principal precisa REMOVER o campo — updateDoc não
+  // aceita undefined, daí o deleteField() explícito.
+  const { parentId, ...rest } = data
+  await updateDoc(categoryDoc(uid, categoryId), { ...rest, parentId: parentId ? parentId : deleteField() })
 }
 
 export async function deleteCategory(uid: string, categoryId: string): Promise<void> {

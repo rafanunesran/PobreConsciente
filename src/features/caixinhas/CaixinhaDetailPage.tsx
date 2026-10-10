@@ -14,6 +14,7 @@ import { MonthSelector } from '../../components/ui/MonthSelector'
 import { currentYearMonth } from '../transactions/dateUtils'
 import { cn, formatBRL } from '../../lib/utils'
 import { useUserProfiles } from '../family/useUserProfiles'
+import { CaixinhaGoalBar } from './CaixinhaGoalBar'
 
 const MOVEMENT_ICONS: Record<CaixinhaMovementType, typeof ArrowDownCircle> = {
   guardar: ArrowDownCircle,
@@ -142,6 +143,12 @@ export function CaixinhaDetailPage() {
         <div className="h-40 animate-pulse rounded-2xl border border-border-light bg-surface-light dark:border-border-dark dark:bg-surface-dark-elevated" />
       ) : (
         <>
+          {caixinha.goalAmount !== undefined ? (
+            <Card>
+              <CaixinhaGoalBar caixinha={caixinha} detailed />
+            </Card>
+          ) : null}
+
           <div className="grid grid-cols-2 gap-3">
             <Link to={`${base}/transferir?direction=guardar`}>
               <Button type="button" className="w-full gap-2">

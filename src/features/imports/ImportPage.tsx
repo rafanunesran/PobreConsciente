@@ -17,6 +17,7 @@ import { isLikelyDuplicate } from './duplicates'
 import { expandFutureInstallments } from './expandInstallments'
 import { importTransactions } from './api'
 import type { ImportTarget, ParsedEntry } from './types'
+import { categoryOptions } from '../categories/categoryTree'
 
 interface ReviewRow extends ParsedEntry {
   selected: boolean
@@ -245,13 +246,11 @@ export function ImportPage() {
                   )}
                 >
                   <option value="">Selecione a categoria</option>
-                  {categories
-                    .filter((c) => c.type === row.type)
-                    .map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name}
-                      </option>
-                    ))}
+                  {categoryOptions(categories, row.type).map(({ category, label }) => (
+                    <option key={category.id} value={category.id}>
+                      {label}
+                    </option>
+                  ))}
                 </select>
               </div>
               )

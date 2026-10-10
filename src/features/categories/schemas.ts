@@ -6,6 +6,7 @@ export const categorySchema = z.object({
   type: z.enum(CATEGORY_TYPES, 'Selecione um tipo'),
   icon: z.enum(CATEGORY_ICONS, 'Selecione um ícone'),
   color: z.enum(CATEGORY_COLORS, 'Selecione uma cor'),
+  parentId: z.string().optional(), // '' ou ausente = categoria principal
 })
 
 export type CategoryFormData = z.infer<typeof categorySchema>

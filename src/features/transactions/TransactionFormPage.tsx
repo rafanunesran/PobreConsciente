@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useEffect, useMemo, useState } from 'react'
+import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useAuthStore } from '../../stores/authStore'
@@ -11,6 +11,7 @@ import { Button } from '../../components/ui/Button'
 import { Input } from '../../components/ui/Input'
 import { Select } from '../../components/ui/Select'
 import { cn } from '../../lib/utils'
+import { categoryOptions } from '../categories/categoryTree'
 import { expenseSchema, incomeSchema, type ExpenseFormData, type IncomeFormData } from './schemas'
 import { createTransaction, deleteTransaction, getTransaction, updateTransaction } from './api'
 import { createRecurringTransaction } from './recurring'
@@ -23,6 +24,11 @@ import {
   type SeriesScope,
 } from './series'
 import { SeriesScopeDialog } from './SeriesScopeDialog'
+import { TagInput } from './TagInput'
+import { AttachmentsSection } from '../attachments/AttachmentsSection'
+import { addAttachment, deleteAttachmentsOf, type NewAttachment } from '../attachments/api'
+import { collectTags } from './tags'
+import { useTransactions } from './useTransactions'
 import type { Transaction, TransactionFormData } from './types'
 
 type Kind = 'despesa' | 'receita'
@@ -33,6 +39,8 @@ function todayISO(): string {
 
 export function TransactionFormPage() {
   const navigate = useNavigate()
+  const location = useLocation()
+  const attachmentFailed = (location.state as { attachmentFailed?: boolean } | null)?.attachmentFailed === true
   const { kind, transactionId } = useParams<{ kind: Kind; transactionId?: string }>()
   const isExpense = kind === 'despesa'
   const isEditMode = Boolean(transactionId)
@@ -42,7 +50,9 @@ export function TransactionFormPage() {
   const { accounts } = useAccounts(workspaceId ?? '')
   const { cards } = useCards(workspaceId ?? '')
   const { categories } = useCategories(workspaceId ?? '')
-  const relevantCategories = categories.filter((c) => c.type === (isExpense ? 'expense' : 'income'))
+  const { transactions: allTransactions } = useTransactions(workspaceId ?? '')
+  const tagSuggestions = useMemo(() => collectTags(allTransactions), [allTransactions])
+  const relevantCategories = categoryOptions(categories, isExpense ? 'expense' : 'income')
 
   const [formError, setFormError] = useState<string | null>(null)
   const [isLoadingTransaction, setIsLoadingTransaction] = useState(isEditMode)
@@ -60,6 +70,9 @@ export function TransactionFormPage() {
   >(null)
   const [scopeBusy, setScopeBusy] = useState(false)
   const [scopeError, setScopeError] = useState<string | null>(null)
+  // Comprovantes escolhidos antes do lançamento existir (modo criação) —
+  // gravados logo depois do createTransaction, já com o id em mãos.
+  const [pendingAttachments, setPendingAttachments] = useState<NewAttachment[]>([])
 
   const expenseForm = useForm<ExpenseFormData>({
     resolver: zodResolver(expenseSchema),
@@ -75,6 +88,7 @@ export function TransactionFormPage() {
       recurrence: 'none',
       installmentsCount: 2,
       installmentAmountMode: 'total',
+      tags: [],
     },
   })
   const incomeForm = useForm<IncomeFormData>({
@@ -89,6 +103,7 @@ export function TransactionFormPage() {
       recurrence: 'none',
       installmentsCount: 2,
       installmentAmountMode: 'total',
+      tags: [],
     },
   })
 
@@ -125,6 +140,7 @@ export function TransactionFormPage() {
             recurrence: 'none',
             installmentsCount: 2,
             installmentAmountMode: 'total',
+            tags: transaction.tags ?? [],
           })
         } else {
           incomeForm.reset({
@@ -137,6 +153,7 @@ export function TransactionFormPage() {
             recurrence: 'none',
             installmentsCount: 2,
             installmentAmountMode: 'total',
+            tags: transaction.tags ?? [],
           })
         }
         setIsLoadingTransaction(false)
@@ -152,6 +169,24 @@ export function TransactionFormPage() {
   }, [workspaceId, transactionId, isExpense, navigate, expenseForm, incomeForm])
 
   if (!user || !workspaceId) return null
+
+  // Cria um lançamento avulso e anexa os comprovantes pendentes. Se o
+  // anexo falhar, o lançamento já existe — abre a edição dele pra pessoa
+  // tentar anexar de novo, em vez de perder o arquivo em silêncio.
+  // Devolve false quando já navegou pra edição (o caller não segue pro extrato).
+  async function createSingleWithAttachments(payload: TransactionFormData): Promise<boolean> {
+    if (!user || !workspaceId) return false
+    const newId = await createTransaction(workspaceId, payload, user.uid)
+    try {
+      for (const attachment of pendingAttachments) {
+        await addAttachment(workspaceId, newId, attachment, user.uid)
+      }
+      return true
+    } catch {
+      navigate(`/registros/${kind}/${newId}/editar`, { replace: true, state: { attachmentFailed: true } })
+      return false
+    }
+  }
 
   async function onSubmitExpense(data: ExpenseFormData) {
     if (!user || !workspaceId) return
@@ -173,6 +208,7 @@ export function TransactionFormPage() {
           description: data.description,
           categoryId: data.categoryId,
           paid: data.paid,
+          tags: data.tags ?? [],
           ...linkage,
         }
         // Lançamento de série (fixo ou parcelado): antes de gravar,
@@ -191,6 +227,7 @@ export function TransactionFormPage() {
             description: data.description,
             categoryId: data.categoryId,
             dayOfMonth: Number(data.date.slice(-2)),
+            tags: data.tags ?? [],
             ...linkage,
           },
           'expense',
@@ -200,7 +237,14 @@ export function TransactionFormPage() {
       } else if (data.recurrence === 'installments') {
         await createInstallmentTransaction(
           workspaceId,
-          { amount: data.amount, description: data.description, categoryId: data.categoryId, date: data.date, ...linkage },
+          {
+            amount: data.amount,
+            description: data.description,
+            categoryId: data.categoryId,
+            date: data.date,
+            tags: data.tags ?? [],
+            ...linkage,
+          },
           'expense',
           data.installmentsCount ?? 2,
           data.installmentAmountMode === 'perInstallment',
@@ -215,9 +259,10 @@ export function TransactionFormPage() {
           description: data.description,
           categoryId: data.categoryId,
           paid: paidOnCreate,
+          tags: data.tags ?? [],
           ...linkage,
         }
-        await createTransaction(workspaceId, payload, user.uid)
+        if (!(await createSingleWithAttachments(payload))) return
       }
       navigate('/registros')
     } catch {
@@ -238,6 +283,7 @@ export function TransactionFormPage() {
           categoryId: data.categoryId,
           accountId: data.accountId,
           paid: data.paid,
+          tags: data.tags ?? [],
         }
         // Lançamento de série (fixo ou parcelado): antes de gravar,
         // pergunta o alcance — quem grava é handleScopeConfirm.
@@ -256,6 +302,7 @@ export function TransactionFormPage() {
             categoryId: data.categoryId,
             dayOfMonth: Number(data.date.slice(-2)),
             accountId: data.accountId,
+            tags: data.tags ?? [],
           },
           'income',
           data.paid,
@@ -270,6 +317,7 @@ export function TransactionFormPage() {
             categoryId: data.categoryId,
             date: data.date,
             accountId: data.accountId,
+            tags: data.tags ?? [],
           },
           'income',
           data.installmentsCount ?? 2,
@@ -286,8 +334,9 @@ export function TransactionFormPage() {
           categoryId: data.categoryId,
           accountId: data.accountId,
           paid: data.paid,
+          tags: data.tags ?? [],
         }
-        await createTransaction(workspaceId, payload, user.uid)
+        if (!(await createSingleWithAttachments(payload))) return
       }
       navigate('/registros')
     } catch {
@@ -300,6 +349,7 @@ export function TransactionFormPage() {
     setIsDeleting(true)
     try {
       await deleteTransaction(workspaceId, transactionId)
+      await deleteAttachmentsOf(workspaceId, [transactionId]).catch(() => undefined)
       navigate('/registros')
     } catch {
       setFormError('Não foi possível excluir. Tente novamente.')
@@ -319,6 +369,15 @@ export function TransactionFormPage() {
         await updateTransactionSeries(workspaceId, loadedTransaction, scopePrompt.payload, scope)
       } else {
         await deleteTransactionSeries(workspaceId, loadedTransaction, scope)
+        // Mesmo critério de alcance de series.ts (isInScope): o próprio
+        // lançamento sempre, os irmãos conforme o escopo escolhido.
+        const removedIds = [
+          loadedTransaction.id,
+          ...(scope === 'one'
+            ? []
+            : series.filter((t) => t.id !== loadedTransaction.id && (scope === 'all' || !t.paid)).map((t) => t.id)),
+        ]
+        await deleteAttachmentsOf(workspaceId, removedIds).catch(() => undefined)
       }
       navigate('/registros')
     } catch {
@@ -391,6 +450,11 @@ export function TransactionFormPage() {
         <h1 className="text-xl font-semibold text-light-primary dark:text-dark-primary">
           {isEditMode ? 'Editar' : 'Nova'} {isExpense ? 'despesa' : 'receita'}
         </h1>
+        {attachmentFailed ? (
+          <p className="text-sm text-danger">
+            O lançamento foi salvo, mas o comprovante não foi anexado. Tente anexar de novo abaixo.
+          </p>
+        ) : null}
         {seriesKind !== null ? (
           <p className="text-sm text-light-secondary dark:text-dark-secondary">
             {seriesKind === 'recurring'
@@ -433,12 +497,17 @@ export function TransactionFormPage() {
             {...expenseForm.register('categoryId')}
           >
             <option value="">Selecione</option>
-            {relevantCategories.map((category) => (
+            {relevantCategories.map(({ category, label }) => (
               <option key={category.id} value={category.id}>
-                {category.name}
+                {label}
               </option>
             ))}
           </Select>
+          <TagInput
+            value={expenseForm.watch('tags') ?? []}
+            onChange={(tags) => expenseForm.setValue('tags', tags)}
+            suggestions={tagSuggestions}
+          />
 
           <div className="flex flex-col gap-1.5">
             <span className="text-sm text-light-secondary dark:text-dark-secondary">Pago com</span>
@@ -599,6 +668,16 @@ export function TransactionFormPage() {
             </div>
           ) : null}
 
+          {isEditMode || recurrence === 'none' ? (
+            <AttachmentsSection
+              workspaceId={workspaceId}
+              userId={user.uid}
+              transactionId={transactionId}
+              pending={pendingAttachments}
+              onPendingChange={setPendingAttachments}
+            />
+          ) : null}
+
           {formError ? <p className="text-sm text-danger">{formError}</p> : null}
 
           <Button type="submit" disabled={expenseForm.formState.isSubmitting}>
@@ -636,12 +715,17 @@ export function TransactionFormPage() {
             {...incomeForm.register('categoryId')}
           >
             <option value="">Selecione</option>
-            {relevantCategories.map((category) => (
+            {relevantCategories.map(({ category, label }) => (
               <option key={category.id} value={category.id}>
-                {category.name}
+                {label}
               </option>
             ))}
           </Select>
+          <TagInput
+            value={incomeForm.watch('tags') ?? []}
+            onChange={(tags) => incomeForm.setValue('tags', tags)}
+            suggestions={tagSuggestions}
+          />
           <Select
             label="Conta"
             error={incomeForm.formState.errors.accountId?.message}
@@ -746,6 +830,16 @@ export function TransactionFormPage() {
                 </div>
               </div>
             </div>
+          ) : null}
+
+          {isEditMode || incomeRecurrence === 'none' ? (
+            <AttachmentsSection
+              workspaceId={workspaceId}
+              userId={user.uid}
+              transactionId={transactionId}
+              pending={pendingAttachments}
+              onPendingChange={setPendingAttachments}
+            />
           ) : null}
 
           {formError ? <p className="text-sm text-danger">{formError}</p> : null}

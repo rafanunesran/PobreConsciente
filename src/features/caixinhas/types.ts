@@ -4,6 +4,8 @@ export interface Caixinha {
   name: string
   balance: number
   yieldLabel?: string // só rótulo informativo, ex: "110% do CDI" — nunca calculado
+  goalAmount?: number // meta de valor a juntar (> 0) — opcional
+  goalDate?: string // 'YYYY-MM-DD' — prazo da meta, opcional mesmo com meta de valor
   createdBy: string // uid de quem criou — nunca alterado em updates
 }
 
