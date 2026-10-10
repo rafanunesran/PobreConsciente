@@ -68,8 +68,8 @@ export function TransactionFiltersBar({
             type="search"
             value={filters.text}
             onChange={(e) => onChange({ ...filters, text: e.target.value })}
-            placeholder="Buscar por descrição, categoria ou tag"
-            aria-label="Buscar lançamentos"
+            placeholder="Buscar lançamentos"
+            aria-label="Buscar por descrição, categoria ou tag"
             className="w-full min-w-0 bg-transparent text-base text-light-primary outline-none placeholder:text-light-secondary dark:text-dark-primary dark:placeholder:text-dark-secondary"
           />
         </label>
