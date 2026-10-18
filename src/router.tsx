@@ -279,6 +279,13 @@ export const router = createBrowserRouter(
           },
         },
         {
+          path: 'conexao-bancaria',
+          lazy: async () => {
+            const { OpenFinancePage } = await import('./features/openFinance/OpenFinancePage')
+            return { Component: OpenFinancePage }
+          },
+        },
+        {
           path: 'familia',
           lazy: async () => {
             const { FamilyPage } = await import('./features/family/FamilyPage')
