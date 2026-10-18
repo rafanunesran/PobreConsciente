@@ -109,7 +109,7 @@ export function FinancialCalendar({ events, month }: FinancialCalendarProps) {
 
       {selectedDay ? (
         <Card className="flex flex-col gap-2">
-          <p className="text-sm font-medium capitalize text-light-primary dark:text-dark-primary">
+          <p className="text-sm font-medium text-light-primary first-letter:uppercase dark:text-dark-primary">
             {format(new Date(`${selectedDay}T00:00:00`), "EEEE, d 'de' MMMM", { locale: ptBR })}
           </p>
           {selectedEvents.length === 0 ? (
