@@ -109,6 +109,17 @@ service cloud.firestore {
         && hasValidCreatedBy();
     }
 
+    match /users/{userId}/debts/{debtId} {
+      allow read, delete: if request.auth != null && isWorkspaceMember(userId);
+      allow create, update: if request.auth != null && isWorkspaceMember(userId)
+        && request.resource.data.direction in ['owe', 'owed']
+        && request.resource.data.person is string
+        && request.resource.data.person.size() > 0 && request.resource.data.person.size() <= 40
+        && request.resource.data.amount is number && request.resource.data.amount > 0
+        && request.resource.data.payments is list
+        && hasValidCreatedBy();
+    }
+
     match /users/{userId}/transactions/{transactionId} {
       allow read, delete: if request.auth != null && isWorkspaceMember(userId);
       allow create, update: if request.auth != null && isWorkspaceMember(userId)

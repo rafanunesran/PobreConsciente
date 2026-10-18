@@ -286,6 +286,34 @@ export const router = createBrowserRouter(
           },
         },
         {
+          path: 'dividas',
+          lazy: async () => {
+            const { DebtsPage } = await import('./features/debts/DebtsPage')
+            return { Component: DebtsPage }
+          },
+        },
+        {
+          path: 'dividas/nova',
+          lazy: async () => {
+            const { DebtFormPage } = await import('./features/debts/DebtFormPage')
+            return { Component: DebtFormPage }
+          },
+        },
+        {
+          path: 'dividas/:debtId/editar',
+          lazy: async () => {
+            const { DebtFormPage } = await import('./features/debts/DebtFormPage')
+            return { Component: DebtFormPage }
+          },
+        },
+        {
+          path: 'dividas/:debtId',
+          lazy: async () => {
+            const { DebtDetailPage } = await import('./features/debts/DebtDetailPage')
+            return { Component: DebtDetailPage }
+          },
+        },
+        {
           path: 'perfil',
           lazy: async () => {
             const { PerfilPage } = await import('./features/auth/PerfilPage')
