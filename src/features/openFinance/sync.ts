@@ -9,9 +9,9 @@ import type { ParsedEntry, ReviewedEntry } from '../imports/types'
 import { transactionsCollection } from '../transactions/api'
 import { formatDate, parseDate, roundToCents } from '../transactions/dateUtils'
 import type { Transaction, TransactionType } from '../transactions/types'
-import { getPluggyConfig, recordPluggySync } from './api'
+import { listPluggyConfigs, recordPluggySync } from './api'
 import { authenticate, listTransactions } from './pluggyClient'
-import type { PluggyAccountLink, PluggyTransaction } from './types'
+import type { PluggyAccountLink, PluggyConfig, PluggyTransaction } from './types'
 
 // Toda importação automática ganha essa tag — dá pra filtrar no extrato o
 // que veio do banco e revisar as categorias sugeridas.
@@ -135,76 +135,124 @@ function linkTargetExists(
 
 export interface SyncResult {
   imported: number
+  // uma mensagem por conexão que falhou — as outras seguem normalmente
+  errors: string[]
 }
 
-async function runSync(workspaceId: string, createdBy: string): Promise<SyncResult> {
-  const config = await getPluggyConfig(workspaceId)
-  if (!config) throw new Error('Conexão bancária não configurada.')
+interface SyncContext {
+  workspaceId: string
+  createdBy: string
+  accountIds: Set<string>
+  cardIds: Set<string>
+  // cresce a cada conexão importada: se marido e mulher vincularem a mesma
+  // conta conjunta, o dedupe por data + tipo + valor da segunda conexão
+  // enxerga o que a primeira acabou de importar.
+  transactions: Transaction[]
+  suggest: (description: string, type: TransactionType) => string | undefined
+  firstCategory: Record<TransactionType, string | undefined>
+}
+
+async function syncConnection(ctx: SyncContext, config: PluggyConfig): Promise<number> {
   const linkEntries = Object.entries(config.links)
-  if (linkEntries.length === 0) return { imported: 0 }
+  if (linkEntries.length === 0) return 0
 
-  const startedAt = new Date().toISOString()
-  try {
-    const today = todayDateString()
-    const overlapStart = config.lastSyncAt ? daysBefore(config.lastSyncAt.slice(0, 10), OVERLAP_DAYS) : ''
-    const dateFrom = [config.syncFrom, overlapStart].filter(Boolean).sort().pop() ?? today
+  const today = todayDateString()
+  const overlapStart = config.lastSyncAt ? daysBefore(config.lastSyncAt.slice(0, 10), OVERLAP_DAYS) : ''
+  const dateFrom = [config.syncFrom, overlapStart].filter(Boolean).sort().pop() ?? today
 
-    const [accountsSnap, cardsSnap, categoriesSnap, transactionsSnap] = await Promise.all([
-      getDocs(accountsCollection(workspaceId)),
-      getDocs(cardsCollection(workspaceId)),
-      getDocs(categoriesCollection(workspaceId)),
-      getDocs(transactionsCollection(workspaceId)),
-    ])
-    const accountIds = new Set(accountsSnap.docs.map((d) => d.id))
-    const cardIds = new Set(cardsSnap.docs.map((d) => d.id))
-    const categories = categoriesSnap.docs.map((d) => d.data())
-    const transactions = transactionsSnap.docs.map((d) => d.data())
+  const apiKey = await authenticate(config.clientId, config.clientSecret)
+  let imported = 0
 
-    const suggest = buildCategorySuggester(transactions)
+  // Sequencial: uma conta por vez, cada uma no seu writeBatch (mesmo
+  // motivo de importTransactions — o incremento de saldo é por destino).
+  for (const [pluggyAccountId, link] of linkEntries) {
+    // conta/cartão apagado no app depois do vínculo — pula em vez de
+    // derrubar a sincronização inteira no update de saldo.
+    if (!linkTargetExists(link, ctx.accountIds, ctx.cardIds)) continue
+    const targetKind = 'cardId' in link ? 'card' : 'account'
+
+    const pluggyTransactions = await listTransactions(apiKey, pluggyAccountId, dateFrom, today)
+    const entries = pluggyTransactions
+      .map((tx) => toBankEntry(tx, targetKind))
+      .filter((entry): entry is BankEntry => entry !== null)
+    const scoped = ctx.transactions.filter((t) =>
+      'cardId' in link ? t.cardId === link.cardId : t.accountId === link.accountId,
+    )
+
+    const reviewed: ReviewedEntry[] = []
+    for (const entry of newBankEntries(entries, scoped)) {
+      const categoryId = ctx.suggest(entry.description, entry.type) ?? ctx.firstCategory[entry.type]
+      if (!categoryId) continue
+      reviewed.push({ ...entry, categoryId, tags: [BANK_SYNC_TAG] })
+    }
+
+    await importTransactions(ctx.workspaceId, reviewed, link, ctx.createdBy)
+    imported += reviewed.length
+    for (const entry of reviewed) {
+      ctx.transactions.push({
+        id: entry.docId ?? '',
+        type: entry.type,
+        amount: entry.amount,
+        date: entry.date,
+        description: entry.description,
+        categoryId: entry.categoryId,
+        paid: targetKind === 'account',
+        createdBy: ctx.createdBy,
+        ...link,
+      })
+    }
+  }
+
+  return imported
+}
+
+async function runSync(
+  workspaceId: string,
+  createdBy: string,
+  shouldSync: (config: PluggyConfig) => boolean,
+): Promise<SyncResult> {
+  const configs = (await listPluggyConfigs(workspaceId)).filter(shouldSync)
+  if (configs.length === 0) return { imported: 0, errors: [] }
+
+  const [accountsSnap, cardsSnap, categoriesSnap, transactionsSnap] = await Promise.all([
+    getDocs(accountsCollection(workspaceId)),
+    getDocs(cardsCollection(workspaceId)),
+    getDocs(categoriesCollection(workspaceId)),
+    getDocs(transactionsCollection(workspaceId)),
+  ])
+  const categories = categoriesSnap.docs.map((d) => d.data())
+  const transactions = transactionsSnap.docs.map((d) => d.data())
+  const ctx: SyncContext = {
+    workspaceId,
+    createdBy,
+    accountIds: new Set(accountsSnap.docs.map((d) => d.id)),
+    cardIds: new Set(cardsSnap.docs.map((d) => d.id)),
+    transactions,
+    suggest: buildCategorySuggester(transactions),
     // Sem histórico nenhum daquele tipo, o sugeridor não tem o que propor —
     // cai na primeira categoria do tipo (a pessoa ajusta depois pela tag).
-    const firstCategory: Record<TransactionType, string | undefined> = {
+    firstCategory: {
       expense: categories.find((c) => c.type === 'expense')?.id,
       income: categories.find((c) => c.type === 'income')?.id,
-    }
-
-    const apiKey = await authenticate(config.clientId, config.clientSecret)
-    let imported = 0
-
-    // Sequencial: uma conta por vez, cada uma no seu writeBatch (mesmo
-    // motivo de importTransactions — o incremento de saldo é por destino).
-    for (const [pluggyAccountId, link] of linkEntries) {
-      // conta/cartão apagado no app depois do vínculo — pula em vez de
-      // derrubar a sincronização inteira no update de saldo.
-      if (!linkTargetExists(link, accountIds, cardIds)) continue
-      const targetKind = 'cardId' in link ? 'card' : 'account'
-
-      const pluggyTransactions = await listTransactions(apiKey, pluggyAccountId, dateFrom, today)
-      const entries = pluggyTransactions
-        .map((tx) => toBankEntry(tx, targetKind))
-        .filter((entry): entry is BankEntry => entry !== null)
-      const scoped = transactions.filter((t) =>
-        'cardId' in link ? t.cardId === link.cardId : t.accountId === link.accountId,
-      )
-
-      const reviewed: ReviewedEntry[] = []
-      for (const entry of newBankEntries(entries, scoped)) {
-        const categoryId = suggest(entry.description, entry.type) ?? firstCategory[entry.type]
-        if (!categoryId) continue
-        reviewed.push({ ...entry, categoryId, tags: [BANK_SYNC_TAG] })
-      }
-
-      await importTransactions(workspaceId, reviewed, link, createdBy)
-      imported += reviewed.length
-    }
-
-    await recordPluggySync(workspaceId, { at: startedAt })
-    return { imported }
-  } catch (err) {
-    const message = err instanceof Error ? err.message : 'Falha na sincronização bancária.'
-    await recordPluggySync(workspaceId, { at: startedAt, error: message }).catch(() => undefined)
-    throw err
+    },
   }
+
+  let imported = 0
+  const errors: string[] = []
+  for (const config of configs) {
+    const startedAt = new Date().toISOString()
+    try {
+      imported += await syncConnection(ctx, config)
+      await recordPluggySync(workspaceId, config.ownerUid, { at: startedAt })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Falha na sincronização bancária.'
+      errors.push(message)
+      await recordPluggySync(workspaceId, config.ownerUid, { at: startedAt, error: message }).catch(
+        () => undefined,
+      )
+    }
+  }
+  return { imported, errors }
 }
 
 // Uma sincronização por vez nesta aba — o StrictMode e cliques repetidos
@@ -212,19 +260,27 @@ async function runSync(workspaceId: string, createdBy: string): Promise<SyncResu
 // os mesmos lançamentos duas vezes antes de um enxergar o outro).
 let running: Promise<SyncResult> | null = null
 
-export function syncBankTransactions(workspaceId: string, createdBy: string): Promise<SyncResult> {
-  running ??= runSync(workspaceId, createdBy).finally(() => {
+function exclusive(task: () => Promise<SyncResult>): Promise<SyncResult> {
+  running ??= task().finally(() => {
     running = null
   })
   return running
 }
 
-// Chamado ao abrir o app (AppShell): só sincroniza se houver conexão
-// configurada e a última tiver mais de AUTO_SYNC_INTERVAL_MS. Silencioso —
-// o erro fica gravado na configuração e aparece na tela de Conexão bancária.
+// "Sincronizar agora": todas as conexões da família, de uma vez.
+export function syncBankTransactions(workspaceId: string, createdBy: string): Promise<SyncResult> {
+  return exclusive(() => runSync(workspaceId, createdBy, () => true))
+}
+
+function isStale(config: PluggyConfig): boolean {
+  if (config.itemIds.length === 0 || Object.keys(config.links).length === 0) return false
+  return !config.lastSyncAt || Date.now() - Date.parse(config.lastSyncAt) >= AUTO_SYNC_INTERVAL_MS
+}
+
+// Chamado ao abrir o app (AppShell): qualquer membro que abre sincroniza
+// as conexões de todos que estiverem há mais de AUTO_SYNC_INTERVAL_MS sem
+// sincronizar. Silencioso — o erro fica gravado em cada conexão e aparece
+// na tela de Conexão bancária.
 export async function autoSyncBankTransactions(workspaceId: string, createdBy: string): Promise<void> {
-  const config = await getPluggyConfig(workspaceId)
-  if (!config || config.itemIds.length === 0 || Object.keys(config.links).length === 0) return
-  if (config.lastSyncAt && Date.now() - Date.parse(config.lastSyncAt) < AUTO_SYNC_INTERVAL_MS) return
-  await syncBankTransactions(workspaceId, createdBy)
+  await exclusive(() => runSync(workspaceId, createdBy, isStale))
 }

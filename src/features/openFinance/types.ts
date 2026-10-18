@@ -4,11 +4,13 @@ import type { ImportTarget } from '../imports/types'
 // cartão do app. Conta da Pluggy sem vínculo é ignorada na sincronização.
 export type PluggyAccountLink = ImportTarget
 
-// Configuração da conexão via Meu Pluggy — uma por workspace (a família
-// inteira compartilha). Credenciais são da própria pessoa (aplicação dela
-// no dashboard da Pluggy), por isso ficam no Firestore do workspace e não
-// num servidor nosso: o app chama a API da Pluggy direto do navegador.
+// Configuração da conexão via Meu Pluggy — uma por pessoa do workspace
+// (no modo família, marido e mulher têm cada um a sua). Credenciais são da
+// própria pessoa (aplicação dela no dashboard da Pluggy), por isso ficam
+// no Firestore do workspace e não num servidor nosso: o app chama a API
+// da Pluggy direto do navegador.
 export interface PluggyConfig {
+  ownerUid: string // quem configurou — só essa pessoa edita as credenciais
   clientId: string
   clientSecret: string
   itemIds: string[]

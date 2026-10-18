@@ -1,9 +1,18 @@
-import { deleteDoc, doc, getDoc, setDoc, updateDoc, deleteField } from 'firebase/firestore'
+import { collection, deleteDoc, deleteField, doc, getDoc, getDocs, setDoc, updateDoc } from 'firebase/firestore'
 import { db } from '../../lib/firebase'
 import type { PluggyAccountLink, PluggyConfig } from './types'
 
-function configRef(uid: string) {
-  return doc(db, 'users', uid, 'integrations', 'pluggy')
+// Uma conexão por pessoa da família (`pluggy_{uid}`): no modo família cada
+// um tem o seu Meu Pluggy e a sua aplicação no Dashboard, e o Item ID de
+// uma aplicação não pode ser lido com as credenciais de outra.
+const ID_PREFIX = 'pluggy_'
+
+function integrationsCollection(uid: string) {
+  return collection(db, 'users', uid, 'integrations')
+}
+
+function configRef(uid: string, ownerUid: string) {
+  return doc(db, 'users', uid, 'integrations', `${ID_PREFIX}${ownerUid}`)
 }
 
 function parseLink(value: unknown): PluggyAccountLink | undefined {
@@ -15,10 +24,8 @@ function parseLink(value: unknown): PluggyAccountLink | undefined {
 
 // Mesmo narrowing campo a campo dos converters das outras features — um
 // doc malformado vira "sem configuração" em vez de estourar em runtime.
-export async function getPluggyConfig(uid: string): Promise<PluggyConfig | null> {
-  const snapshot = await getDoc(configRef(uid))
-  if (!snapshot.exists()) return null
-  const data = snapshot.data()
+function parseConfig(docId: string, data: Record<string, unknown>): PluggyConfig | null {
+  if (!docId.startsWith(ID_PREFIX)) return null
   if (typeof data.clientId !== 'string' || typeof data.clientSecret !== 'string') return null
 
   const links: Record<string, PluggyAccountLink> = {}
@@ -30,6 +37,7 @@ export async function getPluggyConfig(uid: string): Promise<PluggyConfig | null>
   }
 
   return {
+    ownerUid: docId.slice(ID_PREFIX.length),
     clientId: data.clientId,
     clientSecret: data.clientSecret,
     itemIds: Array.isArray(data.itemIds)
@@ -42,25 +50,46 @@ export async function getPluggyConfig(uid: string): Promise<PluggyConfig | null>
   }
 }
 
+export async function getPluggyConfig(uid: string, ownerUid: string): Promise<PluggyConfig | null> {
+  const snapshot = await getDoc(configRef(uid, ownerUid))
+  return snapshot.exists() ? parseConfig(snapshot.id, snapshot.data()) : null
+}
+
+// Todas as conexões do workspace (uma por membro que configurou).
+export async function listPluggyConfigs(uid: string): Promise<PluggyConfig[]> {
+  const snapshot = await getDocs(integrationsCollection(uid))
+  return snapshot.docs
+    .map((d) => parseConfig(d.id, d.data()))
+    .filter((config): config is PluggyConfig => config !== null)
+}
+
 export async function savePluggyConfig(
   uid: string,
+  ownerUid: string,
   config: Pick<PluggyConfig, 'clientId' | 'clientSecret' | 'itemIds' | 'links' | 'syncFrom'>,
 ): Promise<void> {
   // mergeFields: substitui só estes campos por inteiro (inclusive o mapa
   // `links`, pra desvincular uma conta de fato remover a chave) e preserva
   // lastSyncAt — trocar um vínculo não deve reimportar tudo desde syncFrom.
-  await setDoc(configRef(uid), config, {
+  await setDoc(configRef(uid, ownerUid), config, {
     mergeFields: ['clientId', 'clientSecret', 'itemIds', 'links', 'syncFrom'],
   })
 }
 
-export async function recordPluggySync(uid: string, result: { at: string; error?: string }): Promise<void> {
-  await updateDoc(configRef(uid), {
+// Quem sincroniza nem sempre é o dono da conexão (qualquer membro que abre
+// o app sincroniza a família inteira) — por isso só esses dois campos, os
+// únicos que as regras deixam outro membro alterar.
+export async function recordPluggySync(
+  uid: string,
+  ownerUid: string,
+  result: { at: string; error?: string },
+): Promise<void> {
+  await updateDoc(configRef(uid, ownerUid), {
     ...(result.error === undefined ? { lastSyncAt: result.at } : {}),
     lastSyncError: result.error ?? deleteField(),
   })
 }
 
-export async function deletePluggyConfig(uid: string): Promise<void> {
-  await deleteDoc(configRef(uid))
+export async function deletePluggyConfig(uid: string, ownerUid: string): Promise<void> {
+  await deleteDoc(configRef(uid, ownerUid))
 }

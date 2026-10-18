@@ -2,16 +2,17 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
-import { ArrowLeft, ExternalLink, Landmark, RefreshCw } from 'lucide-react'
+import { ArrowLeft, ExternalLink, Landmark, RefreshCw, Users } from 'lucide-react'
 import { useAuthStore } from '../../stores/authStore'
 import { useWorkspaceStore } from '../../stores/workspaceStore'
 import { useAccounts } from '../accounts/useAccounts'
 import { useCards } from '../cards/useCards'
+import { useUserProfiles } from '../family/useUserProfiles'
 import { todayDateString } from '../cards/invoiceUtils'
 import { Button } from '../../components/ui/Button'
 import { Input } from '../../components/ui/Input'
 import { cn, formatBRL } from '../../lib/utils'
-import { deletePluggyConfig, getPluggyConfig, savePluggyConfig } from './api'
+import { deletePluggyConfig, listPluggyConfigs, savePluggyConfig } from './api'
 import { authenticate, getItem, listAccounts } from './pluggyClient'
 import { BANK_SYNC_TAG, syncBankTransactions } from './sync'
 import type { PluggyAccount, PluggyAccountLink, PluggyConfig } from './types'
@@ -46,11 +47,16 @@ export function OpenFinancePage() {
   const navigate = useNavigate()
   const user = useAuthStore((state) => state.user)
   const workspaceId = useWorkspaceStore((state) => state.workspaceId)
+  const family = useWorkspaceStore((state) => state.family)
   const { accounts } = useAccounts(workspaceId ?? '')
   const { cards } = useCards(workspaceId ?? '')
 
+  // `config` é a minha conexão (editável aqui); `otherConfigs`, as dos
+  // outros membros da família — só status, cada um edita a sua.
   const [config, setConfig] = useState<PluggyConfig | null>(null)
+  const [otherConfigs, setOtherConfigs] = useState<PluggyConfig[]>([])
   const [loadingConfig, setLoadingConfig] = useState(true)
+  const profiles = useUserProfiles(otherConfigs.map((c) => c.ownerUid))
 
   const [clientId, setClientId] = useState('')
   const [clientSecret, setClientSecret] = useState('')
@@ -95,13 +101,21 @@ export function OpenFinancePage() {
     }
   }
 
+  async function reloadConfigs(): Promise<PluggyConfig | null> {
+    if (!workspaceId || !user) return null
+    const all = await listPluggyConfigs(workspaceId)
+    const mine = all.find((c) => c.ownerUid === user.uid) ?? null
+    setConfig(mine)
+    setOtherConfigs(all.filter((c) => c.ownerUid !== user.uid))
+    return mine
+  }
+
   useEffect(() => {
-    if (!workspaceId) return
+    if (!workspaceId || !user) return
     let cancelled = false
-    getPluggyConfig(workspaceId)
+    reloadConfigs()
       .then((saved) => {
         if (cancelled) return
-        setConfig(saved)
         if (saved) {
           setClientId(saved.clientId)
           setClientSecret(saved.clientSecret)
@@ -118,7 +132,7 @@ export function OpenFinancePage() {
     return () => {
       cancelled = true
     }
-  }, [workspaceId])
+  }, [workspaceId, user])
 
   if (!user || !workspaceId) return null
 
@@ -147,33 +161,34 @@ export function OpenFinancePage() {
     setSyncMessage(null)
     setSyncError(null)
     try {
-      const { imported } = await syncBankTransactions(workspaceId, user.uid)
+      const { imported, errors } = await syncBankTransactions(workspaceId, user.uid)
       setSyncMessage(
         imported === 0
           ? 'Tudo em dia — nenhum lançamento novo.'
           : `${imported} lançamento(s) importado(s) com a tag "${BANK_SYNC_TAG}".`,
       )
+      if (errors.length > 0) setSyncError(errors.join(' '))
     } catch (err) {
       setSyncError(err instanceof Error ? err.message : 'Falha na sincronização.')
     } finally {
       setSyncing(false)
-      setConfig(await getPluggyConfig(workspaceId).catch(() => config))
+      await reloadConfigs().catch(() => undefined)
     }
   }
 
   async function handleSave() {
-    if (!workspaceId) return
+    if (!workspaceId || !user) return
     setSaving(true)
     setSaveError(null)
     try {
-      await savePluggyConfig(workspaceId, {
+      await savePluggyConfig(workspaceId, user.uid, {
         clientId: clientId.trim(),
         clientSecret: clientSecret.trim(),
         itemIds,
         links: activeLinks,
         syncFrom,
       })
-      setConfig(await getPluggyConfig(workspaceId))
+      await reloadConfigs()
       setSaving(false)
       await runSync()
     } catch (err) {
@@ -183,9 +198,9 @@ export function OpenFinancePage() {
   }
 
   async function handleRemove() {
-    if (!workspaceId) return
-    if (!window.confirm('Remover a conexão bancária? Os lançamentos já importados continuam no app.')) return
-    await deletePluggyConfig(workspaceId)
+    if (!workspaceId || !user) return
+    if (!window.confirm('Remover a sua conexão bancária? Os lançamentos já importados continuam no app.')) return
+    await deletePluggyConfig(workspaceId, user.uid)
     setConfig(null)
     setClientId('')
     setClientSecret('')
@@ -220,28 +235,41 @@ export function OpenFinancePage() {
         </div>
       </div>
 
-      {config ? (
+      {config || otherConfigs.length > 0 ? (
         <div className="flex flex-col gap-3 rounded-2xl border border-border-light bg-surface-light p-4 dark:border-border-dark dark:bg-surface-dark-elevated">
-          <div className="flex items-center gap-2">
-            <Landmark size={18} className="text-brand-500" />
-            <p className="text-sm font-medium text-light-primary dark:text-dark-primary">Conexão ativa</p>
-          </div>
+          {config ? (
+            <ConnectionStatus label="Minha conexão" config={config} hideError={syncMessage !== null} />
+          ) : null}
+          {otherConfigs.map((other) => (
+            <ConnectionStatus
+              key={other.ownerUid}
+              label={`Conexão de ${profiles.get(other.ownerUid)?.displayName ?? 'outro membro'}`}
+              config={other}
+              hideError={syncMessage !== null}
+            />
+          ))}
           <p className="text-xs text-light-secondary dark:text-dark-secondary">
-            {config.lastSyncAt
-              ? `Última sincronização: ${formatSyncDate(config.lastSyncAt)}.`
-              : 'Ainda não sincronizado.'}{' '}
-            O app sincroniza sozinho ao ser aberto (no máximo a cada 6 horas). O banco atualiza o Meu
+            O app sincroniza sozinho ao ser aberto (no máximo a cada 6 horas)
+            {otherConfigs.length > 0 ? ', as conexões de toda a família' : ''}. O banco atualiza o Meu
             Pluggy uma vez por dia.
           </p>
-          {config.lastSyncError && !syncMessage ? (
-            <p className="text-xs text-danger">Última tentativa falhou: {config.lastSyncError}</p>
-          ) : null}
           {syncMessage ? <p className="text-sm text-brand-500">{syncMessage}</p> : null}
           {syncError ? <p className="text-sm text-danger">{syncError}</p> : null}
           <Button type="button" onClick={runSync} disabled={syncing}>
             <RefreshCw size={18} className={cn(syncing && 'animate-spin')} />
-            {syncing ? 'Sincronizando...' : 'Sincronizar agora'}
+            {syncing ? 'Sincronizando...' : otherConfigs.length > 0 ? 'Sincronizar todas agora' : 'Sincronizar agora'}
           </Button>
+        </div>
+      ) : null}
+
+      {family ? (
+        <div className="flex items-start gap-2 rounded-2xl border border-border-light p-3 text-xs text-light-secondary dark:border-border-dark dark:text-dark-secondary">
+          <Users size={16} className="mt-0.5 shrink-0" />
+          <p>
+            Modo família: cada pessoa configura aqui a <strong>sua</strong> conexão, entrando no app com
+            a própria conta e usando o próprio Meu Pluggy. Os lançamentos de todos caem no mesmo
+            workspace. Conta conjunta: basta uma pessoa vincular.
+          </p>
         </div>
       ) : null}
 
@@ -329,7 +357,7 @@ export function OpenFinancePage() {
           />
         </div>
         <p className="text-xs text-light-secondary dark:text-dark-secondary">
-          As credenciais ficam salvas na sua conta do app (membros da família também enxergam) e só dão
+          As credenciais ficam salvas no app (membros da família também enxergam) e só dão
           acesso de leitura aos dados que você autorizou no Meu Pluggy.
         </p>
         <Button
@@ -438,8 +466,25 @@ export function OpenFinancePage() {
 
       {config ? (
         <Button type="button" variant="secondary" onClick={handleRemove} className="mb-6">
-          Remover conexão
+          Remover minha conexão
         </Button>
+      ) : null}
+    </div>
+  )
+}
+
+function ConnectionStatus({ label, config, hideError }: { label: string; config: PluggyConfig; hideError: boolean }) {
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="flex items-center gap-2">
+        <Landmark size={18} className="text-brand-500" />
+        <p className="text-sm font-medium text-light-primary dark:text-dark-primary">{label}</p>
+      </div>
+      <p className="text-xs text-light-secondary dark:text-dark-secondary">
+        {config.lastSyncAt ? `Última sincronização: ${formatSyncDate(config.lastSyncAt)}.` : 'Ainda não sincronizado.'}
+      </p>
+      {config.lastSyncError && !hideError ? (
+        <p className="text-xs text-danger">Última tentativa falhou: {config.lastSyncError}</p>
       ) : null}
     </div>
   )
