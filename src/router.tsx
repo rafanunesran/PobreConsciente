@@ -314,6 +314,13 @@ export const router = createBrowserRouter(
           },
         },
         {
+          path: 'patrimonio',
+          lazy: async () => {
+            const { NetWorthPage } = await import('./features/networth/NetWorthPage')
+            return { Component: NetWorthPage }
+          },
+        },
+        {
           path: 'perfil',
           lazy: async () => {
             const { PerfilPage } = await import('./features/auth/PerfilPage')

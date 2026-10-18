@@ -39,3 +39,28 @@ export function useCaixinhas(uid: string, accountId: string): UseCaixinhasResult
 
   return { caixinhas, loading, error }
 }
+
+// Todas as caixinhas do workspace, de todas as contas — usado no patrimônio.
+export function useAllCaixinhas(uid: string): UseCaixinhasResult {
+  const [caixinhas, setCaixinhas] = useState<Caixinha[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(false)
+
+  useEffect(() => {
+    setLoading(true)
+    setError(false)
+    return onSnapshot(
+      caixinhasCollection(uid),
+      (snapshot) => {
+        setCaixinhas(snapshot.docs.map((doc) => doc.data()))
+        setLoading(false)
+      },
+      () => {
+        setError(true)
+        setLoading(false)
+      },
+    )
+  }, [uid])
+
+  return { caixinhas, loading, error }
+}
