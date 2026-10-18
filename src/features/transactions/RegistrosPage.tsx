@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { useEffect, useMemo, useState } from 'react'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { Download, Plus, Receipt } from 'lucide-react'
 import { useAuthStore } from '../../stores/authStore'
 import { useWorkspaceStore } from '../../stores/workspaceStore'
@@ -18,14 +18,24 @@ import { downloadCsv, transactionsToCsv } from './exportCsv'
 import { effectiveMonth } from '../cards/invoiceUtils'
 import { EMPTY_FILTERS, filterTransactions, hasActiveFilters, type TransactionFilters } from './filterTransactions'
 
+// Vindo do form de lançamento: abre no mês do que foi salvo e destaca a linha.
+export interface RegistrosLocationState {
+  month?: string
+  highlightKey?: string
+}
+
 export function RegistrosPage() {
+  const location = useLocation()
+  const navigate = useNavigate()
+  const incoming = location.state as RegistrosLocationState | null
   const user = useAuthStore((state) => state.user)
   const workspaceId = useWorkspaceStore((state) => state.workspaceId)
   const { transactions, loading, error } = useTransactions(workspaceId ?? '')
   const { accounts } = useAccounts(workspaceId ?? '')
   const { cards } = useCards(workspaceId ?? '')
   const { categories } = useCategories(workspaceId ?? '')
-  const [selectedMonth, setSelectedMonth] = useState(currentYearMonth())
+  const [selectedMonth, setSelectedMonth] = useState(incoming?.month ?? currentYearMonth())
+  const [highlightKey, setHighlightKey] = useState<string | null>(incoming?.highlightKey ?? null)
   const [filters, setFilters] = useState<TransactionFilters>(EMPTY_FILTERS)
 
   const accountsById = useMemo(() => new Map(accounts.map((account) => [account.id, account])), [accounts])
@@ -41,6 +51,17 @@ export function RegistrosPage() {
       filtering ? filterTransactions(transactions, filters, selectedMonth, cardsById, categoriesById) : [],
     [filtering, transactions, filters, selectedMonth, cardsById, categoriesById],
   )
+
+  // Consome o state (pra voltar/avançar no histórico não repetir o destaque)
+  // e apaga o destaque depois de alguns segundos.
+  useEffect(() => {
+    if (incoming) navigate('.', { replace: true, state: null })
+  }, [incoming, navigate])
+  useEffect(() => {
+    if (!highlightKey) return
+    const timer = window.setTimeout(() => setHighlightKey(null), 3000)
+    return () => window.clearTimeout(timer)
+  }, [highlightKey])
 
   if (!user || !workspaceId) return null
 
@@ -59,7 +80,7 @@ export function RegistrosPage() {
     <div className="flex flex-col gap-6 px-6 pt-4">
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-semibold text-light-primary dark:text-dark-primary">
-          Registros
+          Extrato
         </h1>
         <div className="flex gap-2">
           {transactions.length > 0 ? (
@@ -129,6 +150,7 @@ export function RegistrosPage() {
               accountsById={accountsById}
               cardsById={cardsById}
               selectedMonth={selectedMonth}
+              highlightKey={highlightKey}
             />
           )}
         </>

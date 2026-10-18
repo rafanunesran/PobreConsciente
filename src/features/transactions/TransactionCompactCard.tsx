@@ -5,7 +5,6 @@ import { CheckCircle2, Receipt } from 'lucide-react'
 import { CATEGORY_ICON_COMPONENTS } from '../categories/types'
 import type { Category } from '../categories/types'
 import { Card } from '../../components/ui/Card'
-import { Button } from '../../components/ui/Button'
 import { PaymentStatusBadge } from './PaymentStatusBadge'
 import { cn, formatBRL } from '../../lib/utils'
 import { useWorkspaceStore } from '../../stores/workspaceStore'
@@ -26,6 +25,10 @@ interface TransactionCompactCardProps {
   // o botão "Pago"/"Recebido".
   onConfirm?: () => void
   confirming?: boolean
+  // Dentro de uma lista já agrupada por dia, a data no subtítulo é redundante.
+  showDate?: boolean
+  // Destaque temporário (ex.: o lançamento que acabou de ser salvo).
+  highlighted?: boolean
 }
 
 export function TransactionCompactCard({
@@ -37,6 +40,8 @@ export function TransactionCompactCard({
   onToggleSelect,
   onConfirm,
   confirming,
+  showDate = true,
+  highlighted = false,
 }: TransactionCompactCardProps) {
   const Icon = category ? CATEGORY_ICON_COMPONENTS[category.icon] : Receipt
   const kind = transaction.type === 'expense' ? 'despesa' : 'receita'
@@ -46,72 +51,87 @@ export function TransactionCompactCard({
 
   const payable = !selectMode && onConfirm !== undefined && !transaction.paid
 
+  const subtitle = [
+    showDate ? format(new Date(`${transaction.date}T00:00:00`), "d 'de' MMM", { locale: ptBR }) : null,
+    category?.name,
+    linkedName,
+    authorName,
+  ]
+    .filter(Boolean)
+    .join(' · ')
+
+  // Linha única (ícone · descrição · valor à direita), no padrão dos apps
+  // de banco — legível no celular mesmo com descrição longa.
   const content = (
-    <Card className={cn('flex flex-col gap-2 p-3', selected && payable && 'border-brand-500')}>
-      <div className="flex items-center gap-2">
-        {selectMode ? (
-          <input
-            type="checkbox"
-            aria-label="Selecionar"
-            checked={selected ?? false}
-            onChange={onToggleSelect}
-            onClick={(e) => e.stopPropagation()}
-            className="h-4 w-4 shrink-0 accent-brand-500"
-          />
-        ) : null}
-        {payable ? (
-          <input
-            type="checkbox"
-            aria-label="Selecionar"
-            checked={selected ?? false}
-            onChange={onToggleSelect}
-            className="relative z-10 h-4 w-4 shrink-0 accent-brand-500"
-          />
-        ) : null}
-        <span
-          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-white"
-          style={{ backgroundColor: category?.color ?? '#6B7280' }}
-        >
-          <Icon size={14} />
-        </span>
-        <p className="min-w-0 flex-1 truncate text-sm font-medium text-light-primary dark:text-dark-primary">
+    <Card
+      className={cn(
+        'flex items-center gap-3 p-3 transition-shadow duration-500',
+        selected && (payable || selectMode) && 'border-brand-500',
+        highlighted && 'border-brand-500 ring-2 ring-brand-500/60',
+      )}
+    >
+      {selectMode ? (
+        <input
+          type="checkbox"
+          aria-label="Selecionar"
+          checked={selected ?? false}
+          onChange={onToggleSelect}
+          onClick={(e) => e.stopPropagation()}
+          className="h-4 w-4 shrink-0 accent-brand-500"
+        />
+      ) : null}
+      {payable ? (
+        <input
+          type="checkbox"
+          aria-label={`Selecionar ${transaction.description}`}
+          checked={selected ?? false}
+          onChange={onToggleSelect}
+          className="relative z-10 h-4 w-4 shrink-0 accent-brand-500"
+        />
+      ) : null}
+      <span
+        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-white"
+        style={{ backgroundColor: category?.color ?? '#6B7280' }}
+      >
+        <Icon size={18} />
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-medium text-light-primary dark:text-dark-primary">
           {transaction.description}
         </p>
-        {selectMode ? null : <PaymentStatusBadge paid={transaction.paid} type={transaction.type} />}
-      </div>
-      <div>
-        <p className="truncate text-xs text-light-secondary dark:text-dark-secondary">
-          {format(new Date(`${transaction.date}T00:00:00`), "d 'de' MMM", { locale: ptBR })}
-          {linkedName ? ` · ${linkedName}` : ''}
-          {authorName ? ` · ${authorName}` : ''}
-        </p>
+        {subtitle ? (
+          <p className="truncate text-xs text-light-secondary dark:text-dark-secondary">{subtitle}</p>
+        ) : null}
         {transaction.tags && transaction.tags.length > 0 ? (
           <p className="truncate text-xs text-brand-500">
             {transaction.tags.map((tag) => `#${tag}`).join(' ')}
           </p>
         ) : null}
+      </div>
+      <div className="flex shrink-0 flex-col items-end gap-1">
         <p
           className={cn(
-            'text-sm font-semibold',
+            'whitespace-nowrap text-sm font-semibold',
             transaction.type === 'expense' ? 'text-danger' : 'text-brand-500',
           )}
         >
           {transaction.type === 'expense' ? '-' : '+'}
           {formatBRL(transaction.amount)}
         </p>
+        {payable ? (
+          <button
+            type="button"
+            disabled={confirming}
+            onClick={onConfirm}
+            className="relative z-10 inline-flex items-center gap-1 rounded-full border border-warning/40 bg-warning/10 px-2 py-0.5 text-[11px] font-semibold text-warning transition-colors duration-200 hover:border-brand-500 hover:bg-brand-500/10 hover:text-brand-500 disabled:opacity-50"
+          >
+            <CheckCircle2 size={12} />
+            {confirming ? 'Salvando' : transaction.type === 'expense' ? 'Marcar pago' : 'Marcar recebido'}
+          </button>
+        ) : selectMode ? null : (
+          <PaymentStatusBadge paid={transaction.paid} type={transaction.type} />
+        )}
       </div>
-      {payable ? (
-        <Button
-          type="button"
-          variant="secondary"
-          className="relative z-10 w-full gap-1 px-2 py-1.5 text-xs"
-          disabled={confirming}
-          onClick={onConfirm}
-        >
-          <CheckCircle2 size={14} />
-          {confirming ? 'Salvando' : transaction.type === 'expense' ? 'Pago' : 'Recebido'}
-        </Button>
-      ) : null}
     </Card>
   )
 
