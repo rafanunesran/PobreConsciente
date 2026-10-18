@@ -272,6 +272,13 @@ export const router = createBrowserRouter(
           },
         },
         {
+          path: 'fluxo-de-caixa',
+          lazy: async () => {
+            const { CashFlowPage } = await import('./features/cashflow/CashFlowPage')
+            return { Component: CashFlowPage }
+          },
+        },
+        {
           path: 'perfil',
           lazy: async () => {
             const { PerfilPage } = await import('./features/auth/PerfilPage')

@@ -1,4 +1,4 @@
-import { BarChart3, CreditCard, Home, PiggyBank, Receipt, User, Wallet, type LucideIcon } from 'lucide-react'
+import { BarChart3, CalendarDays, CreditCard, Home, PiggyBank, Receipt, User, Wallet, type LucideIcon } from 'lucide-react'
 
 export interface NavItem {
   to: string
@@ -22,4 +22,5 @@ export const navItems: NavItem[] = [
 export const moreNavItems: NavItem[] = [
   { to: '/orcamentos', label: 'Orçamentos', icon: PiggyBank, end: false },
   { to: '/relatorios', label: 'Relatórios', icon: BarChart3, end: false },
+  { to: '/fluxo-de-caixa', label: 'Fluxo de caixa', icon: CalendarDays, end: false },
 ]
