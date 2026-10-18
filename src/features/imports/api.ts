@@ -43,7 +43,7 @@ export async function importTransactions(
     const chunk = entries.slice(start, start + BATCH_LIMIT)
 
     for (const entry of chunk) {
-      const ref = doc(transactionsCollection(uid))
+      const ref = entry.docId ? doc(transactionsCollection(uid), entry.docId) : doc(transactionsCollection(uid))
       batch.set(ref, {
         id: ref.id,
         type: entry.type,
@@ -53,6 +53,7 @@ export async function importTransactions(
         categoryId: entry.categoryId,
         paid: accountId !== undefined,
         createdBy,
+        ...(entry.tags && entry.tags.length > 0 ? { tags: entry.tags } : {}),
         ...(entry.installmentIndex !== undefined
           ? { installmentIndex: entry.installmentIndex, installmentTotal: entry.installmentTotal }
           : {}),

@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { signOut } from 'firebase/auth'
-import { Bell, BellOff, Download, LogOut, Moon, Sun, Tag, Trash2, Users } from 'lucide-react'
+import { Bell, BellOff, Download, Landmark, LogOut, Moon, Sun, Tag, Trash2, Users } from 'lucide-react'
 import { auth } from '../../lib/firebase'
 import { useAuthStore } from '../../stores/authStore'
 import { useThemeStore } from '../../stores/themeStore'
@@ -113,6 +113,13 @@ export function PerfilPage() {
           <Button variant="secondary" className="w-full">
             <Tag size={20} />
             Gerenciar categorias
+          </Button>
+        </Link>
+
+        <Link to="/conexao-bancaria">
+          <Button variant="secondary" className="w-full">
+            <Landmark size={20} />
+            Conexão bancária
           </Button>
         </Link>
 

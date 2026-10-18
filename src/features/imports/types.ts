@@ -27,6 +27,10 @@ export interface ParsedEntry {
 // de revisão, a entrada ganha esse campo — só então pode virar Transaction.
 export interface ReviewedEntry extends ParsedEntry {
   categoryId: string
+  // Só na sincronização bancária (openFinance/sync.ts): id determinístico
+  // do documento, pra reimportar o mesmo lançamento ser idempotente.
+  docId?: string
+  tags?: string[]
 }
 
 export type ImportTarget = { accountId: string } | { cardId: string }

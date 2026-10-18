@@ -129,6 +129,20 @@ service cloud.firestore {
         && hasValidCreatedBy();
     }
 
+    // Conexão bancária (Meu Pluggy): credenciais da aplicação da própria
+    // pessoa no dashboard da Pluggy — o app chama a API dela direto do
+    // navegador. Um doc só, id fixo 'pluggy'.
+    match /users/{userId}/integrations/{integrationId} {
+      allow read, delete: if request.auth != null && isWorkspaceMember(userId);
+      allow create, update: if request.auth != null && isWorkspaceMember(userId)
+        && integrationId == 'pluggy'
+        && request.resource.data.clientId is string
+        && request.resource.data.clientSecret is string
+        && request.resource.data.itemIds is list && request.resource.data.itemIds.size() <= 20
+        && request.resource.data.links is map
+        && request.resource.data.syncFrom is string;
+    }
+
     match /users/{userId}/recurringRules/{ruleId} {
       allow read, delete: if request.auth != null && isWorkspaceMember(userId);
       allow create, update: if request.auth != null && isWorkspaceMember(userId)

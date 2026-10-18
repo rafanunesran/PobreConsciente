@@ -10,6 +10,7 @@ import { useWorkspaceStore, syncWorkspace } from '../../stores/workspaceStore'
 import { upsertMyProfile } from '../../features/family/userProfiles'
 import { topUpRecurringRules } from '../../features/transactions/recurring'
 import { notifyUpcomingBills } from '../../features/reminders/billNotifications'
+import { autoSyncBankTransactions } from '../../features/openFinance/sync'
 
 // NOTE: abaixo de `lg`, comportamento igual ao original (coluna única de
 // 480px, bottom nav). Em `lg+`, a Sidebar substitui a bottom nav e a coluna
@@ -51,6 +52,15 @@ export function AppShell() {
   useEffect(() => {
     if (workspaceId && !workspaceLoading) notifyUpcomingBills(workspaceId).catch(() => undefined)
   }, [workspaceId, workspaceLoading])
+
+  // Importa os lançamentos novos do banco (se a conexão bancária estiver
+  // configurada) — no máximo a cada 6h, silencioso: o erro fica gravado na
+  // configuração e aparece na tela de Conexão bancária.
+  useEffect(() => {
+    if (user && workspaceId && !workspaceLoading) {
+      autoSyncBankTransactions(workspaceId, user.uid).catch(() => undefined)
+    }
+  }, [user, workspaceId, workspaceLoading])
 
   // Essencial: as páginas abaixo (Outlet) usam `workspaceId` direto como
   // segmento de caminho no Firestore (`users/{workspaceId}/...`). Se
