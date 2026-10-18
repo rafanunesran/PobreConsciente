@@ -27,6 +27,7 @@ export interface ParsedEntry {
 // de revisão, a entrada ganha esse campo — só então pode virar Transaction.
 export interface ReviewedEntry extends ParsedEntry {
   categoryId: string
+  tags?: string[] // vindas de uma regra de categoria, quando alguma casou
 }
 
 export type ImportTarget = { accountId: string } | { cardId: string }

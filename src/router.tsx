@@ -188,6 +188,13 @@ export const router = createBrowserRouter(
           },
         },
         {
+          path: 'categorias/regras',
+          lazy: async () => {
+            const { CategoryRulesPage } = await import('./features/rules/CategoryRulesPage')
+            return { Component: CategoryRulesPage }
+          },
+        },
+        {
           path: 'categorias/nova',
           lazy: async () => {
             const { CategoryFormPage } = await import('./features/categories/CategoryFormPage')

@@ -25,6 +25,8 @@ import {
 } from './series'
 import { SeriesScopeDialog } from './SeriesScopeDialog'
 import { TagInput } from './TagInput'
+import { useCategoryRules } from '../rules/useCategoryRules'
+import { matchCategoryRule } from '../rules/matchRule'
 import { AttachmentsSection } from '../attachments/AttachmentsSection'
 import { addAttachment, deleteAttachmentsOf, type NewAttachment } from '../attachments/api'
 import { collectTags } from './tags'
@@ -52,6 +54,8 @@ export function TransactionFormPage() {
   const { categories } = useCategories(workspaceId ?? '')
   const { transactions: allTransactions } = useTransactions(workspaceId ?? '')
   const tagSuggestions = useMemo(() => collectTags(allTransactions), [allTransactions])
+  const { rules: categoryRules } = useCategoryRules(workspaceId ?? '')
+  const [appliedRule, setAppliedRule] = useState<string | null>(null)
   const relevantCategories = categoryOptions(categories, isExpense ? 'expense' : 'income')
 
   const [formError, setFormError] = useState<string | null>(null)
@@ -169,6 +173,31 @@ export function TransactionFormPage() {
   }, [workspaceId, transactionId, isExpense, navigate, expenseForm, incomeForm])
 
   if (!user || !workspaceId) return null
+
+  // Só em lançamento novo e só preenche o que está vazio — nunca passa por
+  // cima de uma categoria ou tag que a pessoa já escolheu.
+  function applyRule(description: string) {
+    if (isEditMode) return
+    const rule = matchCategoryRule(categoryRules, description, isExpense ? 'expense' : 'income')
+    if (!rule) return
+    const current = isExpense ? expenseForm.getValues() : incomeForm.getValues()
+    const setCategory = (id: string) =>
+      isExpense
+        ? expenseForm.setValue('categoryId', id, { shouldValidate: true })
+        : incomeForm.setValue('categoryId', id, { shouldValidate: true })
+    const setTags = (tags: string[]) =>
+      isExpense ? expenseForm.setValue('tags', tags) : incomeForm.setValue('tags', tags)
+    let applied = false
+    if (!current.categoryId) {
+      setCategory(rule.categoryId)
+      applied = true
+    }
+    if ((current.tags ?? []).length === 0 && rule.tags && rule.tags.length > 0) {
+      setTags(rule.tags)
+      applied = true
+    }
+    if (applied) setAppliedRule(rule.pattern)
+  }
 
   // Cria um lançamento avulso e anexa os comprovantes pendentes. Se o
   // anexo falhar, o lançamento já existe — abre a edição dele pra pessoa
@@ -476,8 +505,11 @@ export function TransactionFormPage() {
             label="Descrição"
             placeholder="Ex: Supermercado"
             error={expenseForm.formState.errors.description?.message}
-            {...expenseForm.register('description')}
+            {...expenseForm.register('description', { onBlur: (e) => applyRule(e.target.value) })}
           />
+          {appliedRule ? (
+            <p className="-mt-2 text-xs text-brand-500">Categoria sugerida pela regra "{appliedRule}".</p>
+          ) : null}
           <Input
             label="Valor"
             type="number"
@@ -694,8 +726,11 @@ export function TransactionFormPage() {
             label="Descrição"
             placeholder="Ex: Salário"
             error={incomeForm.formState.errors.description?.message}
-            {...incomeForm.register('description')}
+            {...incomeForm.register('description', { onBlur: (e) => applyRule(e.target.value) })}
           />
+          {appliedRule ? (
+            <p className="-mt-2 text-xs text-brand-500">Categoria sugerida pela regra "{appliedRule}".</p>
+          ) : null}
           <Input
             label="Valor"
             type="number"

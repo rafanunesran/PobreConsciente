@@ -18,10 +18,13 @@ import { expandFutureInstallments } from './expandInstallments'
 import { importTransactions } from './api'
 import type { ImportTarget, ParsedEntry } from './types'
 import { categoryOptions } from '../categories/categoryTree'
+import { useCategoryRules } from '../rules/useCategoryRules'
+import { matchCategoryRule } from '../rules/matchRule'
 
 interface ReviewRow extends ParsedEntry {
   selected: boolean
   categoryId: string
+  tags?: string[]
   likelyDuplicate: boolean
 }
 
@@ -40,6 +43,7 @@ export function ImportPage() {
   const { cards } = useCards(workspaceId ?? '')
   const { categories } = useCategories(workspaceId ?? '')
   const { transactions } = useTransactions(workspaceId ?? '')
+  const { rules } = useCategoryRules(workspaceId ?? '')
 
   const [rows, setRows] = useState<ReviewRow[] | null>(null)
   const [fileFormat, setFileFormat] = useState<string | null>(null)
@@ -66,12 +70,17 @@ export function ImportPage() {
       const parsed = await parseFile(file, targetKind)
       const suggest = buildCategorySuggester(transactions)
       setRows(
-        parsed.map((entry) => ({
-          ...entry,
-          selected: !isLikelyDuplicate(entry, scopedTransactions),
-          categoryId: suggest(entry.description, entry.type) ?? '',
-          likelyDuplicate: isLikelyDuplicate(entry, scopedTransactions),
-        })),
+        parsed.map((entry) => {
+          // Regra explícita da pessoa vence a sugestão pelo histórico.
+          const rule = matchCategoryRule(rules, entry.description, entry.type)
+          return {
+            ...entry,
+            selected: !isLikelyDuplicate(entry, scopedTransactions),
+            categoryId: rule?.categoryId ?? suggest(entry.description, entry.type) ?? '',
+            ...(rule?.tags !== undefined ? { tags: rule.tags } : {}),
+            likelyDuplicate: isLikelyDuplicate(entry, scopedTransactions),
+          }
+        }),
       )
       setFileFormat(file.name.toLowerCase().split('.').pop() ?? null)
     } catch (err) {

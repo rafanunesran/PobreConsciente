@@ -31,6 +31,7 @@ export function expandFutureInstallments(entry: ReviewedEntry, existing: Transac
       amount: entry.amount,
       type: entry.type,
       categoryId: entry.categoryId,
+      ...(entry.tags !== undefined ? { tags: entry.tags } : {}),
       installmentIndex: entry.installmentIndex + offset,
       installmentTotal: entry.installmentTotal,
     }

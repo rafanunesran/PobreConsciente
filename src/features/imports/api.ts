@@ -56,6 +56,7 @@ export async function importTransactions(
         ...(entry.installmentIndex !== undefined
           ? { installmentIndex: entry.installmentIndex, installmentTotal: entry.installmentTotal }
           : {}),
+        ...(entry.tags !== undefined && entry.tags.length > 0 ? { tags: entry.tags } : {}),
         ...(accountId !== undefined ? { accountId } : { cardId }),
       })
     }

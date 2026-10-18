@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { CornerDownRight, Plus } from 'lucide-react'
+import { CornerDownRight, Plus, Wand2 } from 'lucide-react'
 import { useAuthStore } from '../../stores/authStore'
 import { useWorkspaceStore } from '../../stores/workspaceStore'
 import { useCategories } from './useCategories'
@@ -108,12 +108,20 @@ export function CategoriesPage() {
         <h1 className="text-xl font-semibold text-light-primary dark:text-dark-primary">
           Categorias
         </h1>
-        <Link to="/categorias/nova">
-          <Button type="button" className="gap-1.5">
-            <Plus size={18} />
-            Nova
-          </Button>
-        </Link>
+        <div className="flex gap-2">
+          <Link to="/categorias/regras">
+            <Button type="button" variant="secondary" className="gap-1.5">
+              <Wand2 size={18} />
+              Regras
+            </Button>
+          </Link>
+          <Link to="/categorias/nova">
+            <Button type="button" className="gap-1.5">
+              <Plus size={18} />
+              Nova
+            </Button>
+          </Link>
+        </div>
       </div>
 
       {loading ? (
