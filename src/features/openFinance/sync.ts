@@ -169,7 +169,6 @@ async function syncConnection(ctx: SyncContext, config: PluggyConfig): Promise<n
 
   const today = todayDateString()
   const overlapStart = config.lastSyncAt ? daysBefore(config.lastSyncAt.slice(0, 10), OVERLAP_DAYS) : ''
-  const dateFrom = [config.syncFrom, overlapStart].filter(Boolean).sort().pop() ?? today
 
   const apiKey = await authenticate(config.clientId, config.clientSecret)
   let imported = 0
@@ -185,6 +184,8 @@ async function syncConnection(ctx: SyncContext, config: PluggyConfig): Promise<n
     // Cartão: a fatura em aberto (e a parcela dela) pode vir datada até o
     // fechamento, depois de hoje — busca até um ciclo à frente.
     const dateTo = targetKind === 'card' ? daysBefore(today, -CARD_LOOKAHEAD_DAYS) : today
+    const start = config.linkSince?.[pluggyAccountId] ?? config.syncFrom
+    const dateFrom = [start, overlapStart].filter(Boolean).sort().pop() ?? today
     const pluggyTransactions = await listTransactions(apiKey, pluggyAccountId, dateFrom, dateTo)
     const entries = pluggyTransactions
       .map((tx) => toBankEntry(tx, targetKind))

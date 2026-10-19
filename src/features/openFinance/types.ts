@@ -19,6 +19,10 @@ export interface PluggyConfig {
   // 'YYYY-MM-DD' — nada antes disso é importado, pra não duplicar o
   // histórico que a pessoa já lançou à mão antes de conectar o banco.
   syncFrom: string
+  // data inicial própria de uma conta da Pluggy (chave: id dela), que vence
+  // `syncFrom` — usada quando o banco vira a fonte de um cartão a partir do
+  // início da fatura atual (ver switchCardToBankSource).
+  linkSince?: Record<string, string>
   lastSyncAt?: string // ISO
   lastSyncError?: string
 }

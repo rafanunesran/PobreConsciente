@@ -531,7 +531,9 @@ export function OpenFinancePage() {
                 return (
                   <DiagnosticPanel
                     workspaceId={workspaceId}
+                    ownerUid={user.uid}
                     config={config}
+                    onSourceChanged={runSync}
                     pluggyAccount={pluggyAccount}
                     link={savedLink}
                     card={'cardId' in savedLink ? cards.find((c) => c.id === savedLink.cardId) : undefined}

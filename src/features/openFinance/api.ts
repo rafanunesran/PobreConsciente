@@ -1,5 +1,17 @@
-import { collection, deleteDoc, deleteField, doc, getDoc, getDocs, setDoc, updateDoc } from 'firebase/firestore'
+import {
+  collection,
+  deleteDoc,
+  deleteField,
+  doc,
+  FieldPath,
+  getDoc,
+  getDocs,
+  setDoc,
+  updateDoc,
+  writeBatch,
+} from 'firebase/firestore'
 import { db } from '../../lib/firebase'
+import { transactionsCollection } from '../transactions/api'
 import type { PluggyAccountLink, PluggyConfig } from './types'
 
 // Uma conexão por pessoa da família (`pluggy_{uid}`): no modo família cada
@@ -45,6 +57,15 @@ function parseConfig(docId: string, data: Record<string, unknown>): PluggyConfig
       : [],
     links,
     syncFrom: typeof data.syncFrom === 'string' ? data.syncFrom : '',
+    ...(data.linkSince && typeof data.linkSince === 'object'
+      ? {
+          linkSince: Object.fromEntries(
+            Object.entries(data.linkSince as Record<string, unknown>).filter(
+              (entry): entry is [string, string] => typeof entry[1] === 'string',
+            ),
+          ),
+        }
+      : {}),
     ...(typeof data.lastSyncAt === 'string' ? { lastSyncAt: data.lastSyncAt } : {}),
     ...(typeof data.lastSyncError === 'string' ? { lastSyncError: data.lastSyncError } : {}),
   }
@@ -96,4 +117,38 @@ export async function recordPluggySync(
 
 export async function deletePluggyConfig(uid: string, ownerUid: string): Promise<void> {
   await deleteDoc(configRef(uid, ownerUid))
+}
+
+// Lançamentos em aberto do cartão que NÃO vieram da sincronização (import
+// de arquivo, ajuste de fatura, lançamento à mão) a partir de `from` — o
+// que "usar o banco como fonte" troca pelos lançamentos do banco.
+export async function nonBankOpenCardTransactions(uid: string, cardId: string, from: string) {
+  const snapshot = await getDocs(transactionsCollection(uid))
+  return snapshot.docs
+    .map((d) => d.data())
+    .filter((t) => t.cardId === cardId && !t.paid && t.date >= from && !t.id.startsWith('pluggy_'))
+}
+
+const BATCH_LIMIT = 500
+
+// O banco vira a fonte do cartão a partir de `from`: apaga os lançamentos
+// em aberto que não vieram dele (cartão em aberto nunca mexe em saldo de
+// conta, então é só apagar) e faz essa conta da Pluggy reimportar desde
+// `from` na próxima sincronização. Fatura já paga fica como está.
+export async function switchCardToBankSource(
+  uid: string,
+  ownerUid: string,
+  pluggyAccountId: string,
+  cardId: string,
+  from: string,
+): Promise<number> {
+  const toDelete = await nonBankOpenCardTransactions(uid, cardId, from)
+  for (let i = 0; i < toDelete.length; i += BATCH_LIMIT) {
+    const batch = writeBatch(db)
+    for (const t of toDelete.slice(i, i + BATCH_LIMIT)) batch.delete(doc(transactionsCollection(uid), t.id))
+    await batch.commit()
+  }
+  // FieldPath: o id da conta tem '-', que não é seguro num caminho com ponto.
+  await updateDoc(configRef(uid, ownerUid), new FieldPath('linkSince', pluggyAccountId), from, 'lastSyncAt', deleteField())
+  return toDelete.length
 }

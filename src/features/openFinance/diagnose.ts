@@ -36,7 +36,7 @@ export interface DiagnosticResult {
 // lançamento a lançamento, o que aconteceu com ele no app — sem gravar nada.
 export async function diagnoseLink(
   workspaceId: string,
-  config: Pick<PluggyConfig, 'clientId' | 'clientSecret' | 'syncFrom'>,
+  config: Pick<PluggyConfig, 'clientId' | 'clientSecret' | 'syncFrom' | 'linkSince'>,
   pluggyAccountId: string,
   link: PluggyAccountLink,
 ): Promise<DiagnosticResult> {
@@ -45,6 +45,7 @@ export async function diagnoseLink(
   const dateFrom = daysBefore(today, DIAGNOSTIC_DAYS_BACK)
   const dateTo = targetKind === 'card' ? daysBefore(today, -CARD_LOOKAHEAD_DAYS) : today
 
+  const start = config.linkSince?.[pluggyAccountId] ?? config.syncFrom
   const apiKey = await authenticate(config.clientId, config.clientSecret)
   const [pluggyTransactions, transactionsSnap] = await Promise.all([
     listTransactions(apiKey, pluggyAccountId, dateFrom, dateTo),
@@ -82,7 +83,7 @@ export async function diagnoseLink(
         targetKind === 'card' && isCardBillPayment(tx) ? 'billPayment' : tx.amount === 0 ? 'zero' : 'pending'
     } else if (existingIds.has(entry.docId)) {
       row.verdict = 'imported'
-    } else if (config.syncFrom && entry.date < config.syncFrom) {
+    } else if (start && entry.date < start) {
       row.verdict = 'beforeStart'
     } else {
       candidates.push({ row, entry })
