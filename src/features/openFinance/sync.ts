@@ -10,6 +10,7 @@ import { transactionsCollection } from '../transactions/api'
 import { formatDate, parseDate, roundToCents } from '../transactions/dateUtils'
 import type { Transaction, TransactionType } from '../transactions/types'
 import { listPluggyConfigs, recordPluggySync } from './api'
+import { applyBankReserveMovements } from './caixinhaSync'
 import { authenticate, listTransactions } from './pluggyClient'
 import type { PluggyAccountLink, PluggyConfig, PluggyTransaction } from './types'
 
@@ -251,6 +252,15 @@ async function runSync(
         () => undefined,
       )
     }
+  }
+
+  // Depois de importar: reservas do Mercado Pago ("Dinheiro reservado X")
+  // também movimentam a caixinha correspondente. Roda sobre tudo que veio
+  // do banco, inclusive o importado antes disso existir (idempotente).
+  try {
+    await applyBankReserveMovements(workspaceId, ctx.transactions, createdBy)
+  } catch (err) {
+    errors.push(err instanceof Error ? err.message : 'Falha ao atualizar as caixinhas.')
   }
   return { imported, errors }
 }
