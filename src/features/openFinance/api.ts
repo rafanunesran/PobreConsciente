@@ -69,11 +69,15 @@ export async function savePluggyConfig(
   config: Pick<PluggyConfig, 'clientId' | 'clientSecret' | 'itemIds' | 'links' | 'syncFrom'>,
 ): Promise<void> {
   // mergeFields: substitui só estes campos por inteiro (inclusive o mapa
-  // `links`, pra desvincular uma conta de fato remover a chave) e preserva
-  // lastSyncAt — trocar um vínculo não deve reimportar tudo desde syncFrom.
-  await setDoc(configRef(uid, ownerUid), config, {
-    mergeFields: ['clientId', 'clientSecret', 'itemIds', 'links', 'syncFrom'],
-  })
+  // `links`, pra desvincular uma conta de fato remover a chave). Apaga
+  // lastSyncAt: depois de salvar (vínculo novo, data inicial mudada) a
+  // próxima sincronização relê tudo desde syncFrom — o que já foi
+  // importado é descartado pelo id/dedupe, então reler é seguro.
+  await setDoc(
+    configRef(uid, ownerUid),
+    { ...config, lastSyncAt: deleteField() },
+    { mergeFields: ['clientId', 'clientSecret', 'itemIds', 'links', 'syncFrom', 'lastSyncAt'] },
+  )
 }
 
 // Quem sincroniza nem sempre é o dono da conexão (qualquer membro que abre

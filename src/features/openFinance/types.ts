@@ -57,6 +57,7 @@ export interface PluggyTransaction {
   type: 'DEBIT' | 'CREDIT'
   status?: 'PENDING' | 'POSTED' | string
   category?: string | null
+  operationType?: string | null
   creditCardMetadata?: {
     installmentNumber?: number
     totalInstallments?: number

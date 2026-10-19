@@ -27,6 +27,8 @@ const AUTO_SYNC_INTERVAL_MS = 6 * 60 * 60 * 1000
 // O que já foi importado é descartado pelo id/dedupe abaixo.
 const OVERLAP_DAYS = 7
 
+const CARD_LOOKAHEAD_DAYS = 45
+
 const DESCRIPTION_MAX = 60 // mesmo teto do form de lançamento (schemas.ts)
 
 function daysBefore(date: string, days: number): string {
@@ -40,8 +42,10 @@ function daysBefore(date: string, days: number): string {
 // Importar também do lado do cartão deixaria a fatura negativa.
 function isCardBillPayment(tx: PluggyTransaction): boolean {
   return (
-    tx.type === 'CREDIT' &&
-    (tx.category === 'Credit card payment' || /pagamento\s+(de\s+)?fatura|pagamento\s+recebido/i.test(tx.description))
+    tx.amount < 0 &&
+    (tx.operationType === 'PAGAMENTO_FATURA' ||
+      tx.category === 'Credit card payment' ||
+      /pagamento\s+(de\s+)?fatura|pagamento\s+recebido/i.test(tx.description))
   )
 }
 
@@ -59,14 +63,20 @@ export interface BankEntry extends ParsedEntry {
 }
 
 export function toBankEntry(tx: PluggyTransaction, targetKind: 'account' | 'card'): BankEntry | null {
-  // pendente ainda pode mudar de valor/descrição (e de id) — só entra
-  // depois de confirmado pela instituição.
-  if (tx.status === 'PENDING') return null
+  // Na conta corrente, pendente é agendamento/bloqueio que ainda pode não
+  // acontecer — só entra depois de confirmado. No cartão é o contrário: a
+  // Pluggy marca como PENDING tudo da fatura em aberto, que é justamente o
+  // que precisa aparecer (se mudar de id ao fechar, o providerId ou o
+  // dedupe por data + valor seguram a duplicata).
+  if (targetKind === 'account' && tx.status === 'PENDING') return null
   if (targetKind === 'card' && isCardBillPayment(tx)) return null
   const amount = roundToCents(Math.abs(tx.amount))
   if (amount === 0) return null
 
-  const type: TransactionType = tx.type === 'CREDIT' ? 'income' : 'expense'
+  // Cartão: a Pluggy sinaliza pelo valor (positivo = compra, negativo =
+  // estorno/crédito) e o `type` nem sempre bate com isso. Conta: `type`.
+  const type: TransactionType =
+    targetKind === 'card' ? (tx.amount < 0 ? 'income' : 'expense') : tx.type === 'CREDIT' ? 'income' : 'expense'
   const description = tx.description.replace(/\s+/g, ' ').trim().slice(0, DESCRIPTION_MAX) || 'Lançamento bancário'
   const installmentTotal = tx.creditCardMetadata?.totalInstallments
   const installmentIndex = tx.creditCardMetadata?.installmentNumber
@@ -172,7 +182,10 @@ async function syncConnection(ctx: SyncContext, config: PluggyConfig): Promise<n
     if (!linkTargetExists(link, ctx.accountIds, ctx.cardIds)) continue
     const targetKind = 'cardId' in link ? 'card' : 'account'
 
-    const pluggyTransactions = await listTransactions(apiKey, pluggyAccountId, dateFrom, today)
+    // Cartão: a fatura em aberto (e a parcela dela) pode vir datada até o
+    // fechamento, depois de hoje — busca até um ciclo à frente.
+    const dateTo = targetKind === 'card' ? daysBefore(today, -CARD_LOOKAHEAD_DAYS) : today
+    const pluggyTransactions = await listTransactions(apiKey, pluggyAccountId, dateFrom, dateTo)
     const entries = pluggyTransactions
       .map((tx) => toBankEntry(tx, targetKind))
       .filter((entry): entry is BankEntry => entry !== null)
