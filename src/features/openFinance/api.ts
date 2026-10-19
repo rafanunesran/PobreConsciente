@@ -149,6 +149,12 @@ export async function switchCardToBankSource(
     await batch.commit()
   }
   // FieldPath: o id da conta tem '-', que não é seguro num caminho com ponto.
-  await updateDoc(configRef(uid, ownerUid), new FieldPath('linkSince', pluggyAccountId), from, 'lastSyncAt', deleteField())
+  await updateDoc(
+    configRef(uid, ownerUid),
+    new FieldPath('linkSince', pluggyAccountId),
+    from,
+    'lastSyncAt',
+    deleteField(),
+  )
   return toDelete.length
 }

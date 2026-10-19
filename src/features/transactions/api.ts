@@ -31,6 +31,7 @@ const transactionConverter: FirestoreDataConverter<Transaction> = {
           }
         : {}),
       ...(t.paidTransactionIds !== undefined ? { paidTransactionIds: t.paidTransactionIds } : {}),
+      ...(t.bankRef !== undefined ? { bankRef: t.bankRef } : {}),
       ...(Array.isArray(t.tags) && t.tags.length > 0 ? { tags: t.tags } : {}),
     }
     return t.accountId !== undefined ? { ...base, accountId: t.accountId } : { ...base, cardId: t.cardId }
@@ -71,6 +72,7 @@ const transactionConverter: FirestoreDataConverter<Transaction> = {
           }
         : {}),
       ...(paidTransactionIds !== undefined ? { paidTransactionIds } : {}),
+      ...(typeof data.bankRef === 'string' && data.bankRef !== '' ? { bankRef: data.bankRef } : {}),
       ...(tags.length > 0 ? { tags } : {}),
     }
   },
@@ -257,6 +259,9 @@ export async function updateTransaction(
       ...seriesFields(oldData),
       ...data,
       ...(oldData.paidTransactionIds !== undefined ? { paidTransactionIds: oldData.paidTransactionIds } : {}),
+      // vínculo com o lançamento do banco também não vem do form — sem
+      // preservar, a próxima sincronização importaria o mesmo gasto de novo.
+      ...(oldData.bankRef !== undefined ? { bankRef: oldData.bankRef } : {}),
       // Quem não conhece tags (confirmar pendente, pagamento de fatura...)
       // não manda o campo — preserva o que já estava gravado.
       tags: data.tags ?? oldData.tags,

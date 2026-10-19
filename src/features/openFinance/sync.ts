@@ -1,5 +1,9 @@
-import { getDocs } from 'firebase/firestore'
-import { accountsCollection } from '../accounts/api'
+import { getDocs, writeBatch } from 'firebase/firestore'
+import { db } from '../../lib/firebase'
+import { accountDoc, accountsCollection } from '../accounts/api'
+import { caixinhaMovementsCollection } from '../caixinhas/movements'
+import type { CaixinhaMovement } from '../caixinhas/types'
+import type { CreditCard } from '../cards/types'
 import { cardsCollection } from '../cards/api'
 import { todayDateString } from '../cards/invoiceUtils'
 import { categoriesCollection } from '../categories/api'
@@ -11,8 +15,16 @@ import { formatDate, parseDate, roundToCents } from '../transactions/dateUtils'
 import type { Transaction, TransactionType } from '../transactions/types'
 import { listPluggyConfigs, recordPluggySync } from './api'
 import { applyBankReserveMovements } from './caixinhaSync'
-import { authenticate, listTransactions } from './pluggyClient'
-import type { PluggyAccountLink, PluggyConfig, PluggyTransaction } from './types'
+import { authenticate, listAccounts, listTransactions } from './pluggyClient'
+import {
+  ACCOUNT_WINDOW_DAYS,
+  CARD_WINDOW_DAYS,
+  isManualCandidate,
+  looksLikeBillPayment,
+  pairBankWithManual,
+} from './matching'
+import { autoPayCardBill, linkManualToBank, mergeImportedDuplicates } from './reconcile'
+import type { PluggyAccount, PluggyAccountLink, PluggyConfig, PluggyTransaction } from './types'
 
 // Toda importação automática ganha essa tag — dá pra filtrar no extrato o
 // que veio do banco e revisar as categorias sugeridas.
@@ -76,8 +88,15 @@ export function toBankEntry(tx: PluggyTransaction, targetKind: 'account' | 'card
   // Cartão: a Pluggy sinaliza pelo valor (positivo = compra, negativo =
   // estorno/crédito) e o `type` nem sempre bate com isso. Conta: `type`.
   const type: TransactionType =
-    targetKind === 'card' ? (tx.amount < 0 ? 'income' : 'expense') : tx.type === 'CREDIT' ? 'income' : 'expense'
-  const description = tx.description.replace(/\s+/g, ' ').trim().slice(0, DESCRIPTION_MAX) || 'Lançamento bancário'
+    targetKind === 'card'
+      ? tx.amount < 0
+        ? 'income'
+        : 'expense'
+      : tx.type === 'CREDIT'
+        ? 'income'
+        : 'expense'
+  const description =
+    tx.description.replace(/\s+/g, ' ').trim().slice(0, DESCRIPTION_MAX) || 'Lançamento bancário'
   const installmentTotal = tx.creditCardMetadata?.totalInstallments
   const installmentIndex = tx.creditCardMetadata?.installmentNumber
 
@@ -104,7 +123,9 @@ function dedupeKey(entry: { date: string; type: TransactionType; amount: number 
 //    multiplicidade: dois cafés iguais no mesmo dia no banco e um só
 //    lançado à mão → importa só o segundo.
 export function newBankEntries(entries: BankEntry[], existing: Transaction[]): BankEntry[] {
-  const existingIds = new Set(existing.map((t) => t.id))
+  // lançamento do app conciliado com um do banco conta como "esse do banco
+  // já existe" (ver reconcile.ts)
+  const existingIds = new Set(existing.flatMap((t) => (t.bankRef !== undefined ? [t.id, t.bankRef] : [t.id])))
   const available = new Map<string, number>()
   for (const t of existing) {
     const key = dedupeKey(t)
@@ -136,11 +157,7 @@ export function newBankEntries(entries: BankEntry[], existing: Transaction[]): B
   return fresh
 }
 
-function linkTargetExists(
-  link: PluggyAccountLink,
-  accountIds: Set<string>,
-  cardIds: Set<string>,
-): boolean {
+function linkTargetExists(link: PluggyAccountLink, accountIds: Set<string>, cardIds: Set<string>): boolean {
   return 'accountId' in link ? accountIds.has(link.accountId) : cardIds.has(link.cardId)
 }
 
@@ -155,6 +172,10 @@ interface SyncContext {
   createdBy: string
   accountIds: Set<string>
   cardIds: Set<string>
+  cards: CreditCard[]
+  movementsById: Map<string, CaixinhaMovement>
+  // saldo informado pelo banco por conta do app — aplicado no fim (ver runSync)
+  bankBalances: Map<string, number>
   // cresce a cada conexão importada: se marido e mulher vincularem a mesma
   // conta conjunta, o dedupe por data + tipo + valor da segunda conexão
   // enxerga o que a primeira acabou de importar.
@@ -173,6 +194,13 @@ async function syncConnection(ctx: SyncContext, config: PluggyConfig): Promise<n
   const apiKey = await authenticate(config.clientId, config.clientSecret)
   let imported = 0
 
+  // Contas da Pluggy (pra saber o saldo atual de cada uma) — uma chamada
+  // por banco conectado.
+  const pluggyAccounts = new Map<string, PluggyAccount>()
+  for (const itemId of config.itemIds) {
+    for (const account of await listAccounts(apiKey, itemId)) pluggyAccounts.set(account.id, account)
+  }
+
   // Sequencial: uma conta por vez, cada uma no seu writeBatch (mesmo
   // motivo de importTransactions — o incremento de saldo é por destino).
   for (const [pluggyAccountId, link] of linkEntries) {
@@ -190,12 +218,69 @@ async function syncConnection(ctx: SyncContext, config: PluggyConfig): Promise<n
     const entries = pluggyTransactions
       .map((tx) => toBankEntry(tx, targetKind))
       .filter((entry): entry is BankEntry => entry !== null)
-    const scoped = ctx.transactions.filter((t) =>
-      'cardId' in link ? t.cardId === link.cardId : t.accountId === link.accountId,
-    )
+    const accountId = 'accountId' in link ? link.accountId : undefined
+    const windowDays = accountId !== undefined ? ACCOUNT_WINDOW_DAYS : CARD_WINDOW_DAYS
+    const scopedNow = () =>
+      ctx.transactions.filter((t) =>
+        'cardId' in link ? t.cardId === link.cardId : t.accountId === link.accountId,
+      )
+
+    // 1. Duplicata que já entrou antes (importado do banco + lançado no
+    //    app): une os dois, fica o do app.
+    const importedSides = scopedNow()
+      .filter((t) => t.id.startsWith('pluggy_'))
+      .map((t) => ({
+        key: t.id,
+        date: t.date,
+        type: t.type,
+        amount: t.amount,
+        description: t.description,
+        imported: t,
+      }))
+    const cleanup = pairBankWithManual(importedSides, scopedNow().filter(isManualCandidate), windowDays)
+    if (cleanup.pairs.length > 0) {
+      await mergeImportedDuplicates(
+        ctx.workspaceId,
+        cleanup.pairs,
+        accountId,
+        ctx.movementsById,
+        ctx.transactions,
+      )
+    }
+
+    // 2. Lançamentos novos do banco: o que já foi importado/conciliado cai
+    //    fora; o que corresponde a algo lançado no app só é vinculado.
+    const fresh = newBankEntries(
+      entries,
+      scopedNow().filter((t) => t.id.startsWith('pluggy_') || t.bankRef !== undefined),
+    ).map((entry) => ({ ...entry, key: entry.docId }))
+    const matched = pairBankWithManual(fresh, scopedNow().filter(isManualCandidate), windowDays)
+    if (matched.pairs.length > 0) await linkManualToBank(ctx.workspaceId, matched.pairs, accountId)
+
+    // 3. Pagamento de fatura na conta sem "Pagar fatura" no app: paga a
+    //    fatura do cartão correspondente em vez de virar despesa solta.
+    const toImport: BankEntry[] = []
+    for (const entry of matched.unmatched) {
+      if (accountId !== undefined && entry.type === 'expense' && looksLikeBillPayment(entry.description)) {
+        const categoryId = ctx.suggest(entry.description, 'expense') ?? ctx.firstCategory.expense
+        const paid =
+          categoryId !== undefined &&
+          (await autoPayCardBill({
+            workspaceId: ctx.workspaceId,
+            bank: entry,
+            accountId,
+            cards: ctx.cards,
+            transactions: ctx.transactions,
+            categoryId,
+            createdBy: ctx.createdBy,
+          }))
+        if (paid) continue
+      }
+      toImport.push(entry)
+    }
 
     const reviewed: ReviewedEntry[] = []
-    for (const entry of newBankEntries(entries, scoped)) {
+    for (const entry of toImport) {
       const categoryId = ctx.suggest(entry.description, entry.type) ?? ctx.firstCategory[entry.type]
       if (!categoryId) continue
       reviewed.push({ ...entry, categoryId, tags: [BANK_SYNC_TAG] })
@@ -203,6 +288,17 @@ async function syncConnection(ctx: SyncContext, config: PluggyConfig): Promise<n
 
     await importTransactions(ctx.workspaceId, reviewed, link, ctx.createdBy)
     imported += reviewed.length
+    // 4. Saldo da conta = saldo do banco (aplicado no fim da sincronização).
+    const pluggyAccount = pluggyAccounts.get(pluggyAccountId)
+    if (
+      accountId !== undefined &&
+      pluggyAccount &&
+      pluggyAccount.type !== 'CREDIT' &&
+      typeof pluggyAccount.balance === 'number'
+    ) {
+      ctx.bankBalances.set(accountId, pluggyAccount.balance)
+    }
+
     for (const entry of reviewed) {
       ctx.transactions.push({
         id: entry.docId ?? '',
@@ -229,11 +325,12 @@ async function runSync(
   const configs = (await listPluggyConfigs(workspaceId)).filter(shouldSync)
   if (configs.length === 0) return { imported: 0, errors: [] }
 
-  const [accountsSnap, cardsSnap, categoriesSnap, transactionsSnap] = await Promise.all([
+  const [accountsSnap, cardsSnap, categoriesSnap, transactionsSnap, movementsSnap] = await Promise.all([
     getDocs(accountsCollection(workspaceId)),
     getDocs(cardsCollection(workspaceId)),
     getDocs(categoriesCollection(workspaceId)),
     getDocs(transactionsCollection(workspaceId)),
+    getDocs(caixinhaMovementsCollection(workspaceId)),
   ])
   const categories = categoriesSnap.docs.map((d) => d.data())
   const transactions = transactionsSnap.docs.map((d) => d.data())
@@ -242,6 +339,9 @@ async function runSync(
     createdBy,
     accountIds: new Set(accountsSnap.docs.map((d) => d.id)),
     cardIds: new Set(cardsSnap.docs.map((d) => d.id)),
+    cards: cardsSnap.docs.map((d) => d.data()),
+    movementsById: new Map(movementsSnap.docs.map((d) => [d.id, d.data()])),
+    bankBalances: new Map(),
     transactions,
     suggest: buildCategorySuggester(transactions),
     // Sem histórico nenhum daquele tipo, o sugeridor não tem o que propor —
@@ -262,9 +362,10 @@ async function runSync(
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Falha na sincronização bancária.'
       errors.push(message)
-      await recordPluggySync(workspaceId, config.ownerUid, { at: startedAt, error: message }).catch(
-        () => undefined,
-      )
+      await recordPluggySync(workspaceId, config.ownerUid, {
+        at: startedAt,
+        error: message,
+      }).catch(() => undefined)
     }
   }
 
@@ -275,6 +376,27 @@ async function runSync(
     await applyBankReserveMovements(workspaceId, ctx.transactions, createdBy)
   } catch (err) {
     errors.push(err instanceof Error ? err.message : 'Falha ao atualizar as caixinhas.')
+  }
+
+  // Por último: o saldo de cada conta vinculada passa a ser o que o banco
+  // informa. É o que garante que app e banco batem mesmo com diferenças
+  // que a conciliação não resolve (lançamento manual que nunca vai
+  // aparecer no banco, saldo inicial errado...). Um lançamento manual pago
+  // que o banco ainda não mostrou "some" do saldo até o banco registrar —
+  // aí é conciliado e o saldo continua batendo.
+  if (ctx.bankBalances.size > 0) {
+    try {
+      const batch = writeBatch(db)
+      for (const [accountId, balance] of ctx.bankBalances) {
+        if (ctx.accountIds.has(accountId))
+          batch.update(accountDoc(workspaceId, accountId), {
+            balance: roundToCents(balance),
+          })
+      }
+      await batch.commit()
+    } catch (err) {
+      errors.push(err instanceof Error ? err.message : 'Falha ao atualizar o saldo das contas.')
+    }
   }
   return { imported, errors }
 }

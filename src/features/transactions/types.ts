@@ -20,6 +20,11 @@ export interface Transaction {
   // Se esta transação for editada de volta pra não-paga (ou apagada), essas
   // voltam a não-pagas junto — ver updateTransaction/deleteTransaction.
   paidTransactionIds?: string[]
+  // presente sse este lançamento (manual, importado de arquivo, gerado por
+  // recorrência...) foi conciliado com um lançamento do banco pela conexão
+  // bancária — guarda o id do documento que o banco teria gerado, pra
+  // sincronização não importar de novo. Ver openFinance/reconcile.ts.
+  bankRef?: string
   tags?: string[] // marcadores livres (ex: "viagem", "reforma"), já normalizados — ver tags.ts
   createdBy: string // uid de quem criou — nunca alterado em updates
 }

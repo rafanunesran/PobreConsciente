@@ -19,7 +19,9 @@ export interface ReserveMovement {
   name: string
 }
 
-export function parseReserveMovement(transaction: Pick<Transaction, 'description' | 'type'>): ReserveMovement | null {
+export function parseReserveMovement(
+  transaction: Pick<Transaction, 'description' | 'type'>,
+): ReserveMovement | null {
   const [, verb, rawName] = RESERVE_PATTERN.exec(transaction.description.trim()) ?? []
   if (!verb || !rawName) return null
   const kind = verb.toLowerCase() === 'reservado' ? 'guardar' : 'resgatar'
@@ -30,12 +32,7 @@ export function parseReserveMovement(transaction: Pick<Transaction, 'description
 }
 
 function normalizeName(name: string): string {
-  return name
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim()
+  return name.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ').trim()
 }
 
 // Igual, ou um é começo do outro — a descrição do banco às vezes corta o

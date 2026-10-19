@@ -44,7 +44,10 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
 // porque é fácil colar o nome do banco no lugar do código — a Pluggy só
 // responderia "Invalid id, not an uuid", sem dizer qual linha.
 function parseItemIds(raw: string): { ids: string[]; invalid: string[] } {
-  const entries = raw.split(/[\n,;]+/).map((entry) => entry.trim()).filter(Boolean)
+  const entries = raw
+    .split(/[\n,;]+/)
+    .map((entry) => entry.trim())
+    .filter(Boolean)
   return {
     ids: Array.from(new Set(entries.filter((entry) => UUID_PATTERN.test(entry)))),
     invalid: entries.filter((entry) => !UUID_PATTERN.test(entry)),
@@ -168,10 +171,7 @@ export function OpenFinancePage() {
     found?.some((a) => a.id === pluggyAccountId),
   )
   const canSave =
-    !saving &&
-    found !== null &&
-    Object.keys(activeLinks).length + activeCreates.length > 0 &&
-    syncFrom !== ''
+    !saving && found !== null && Object.keys(activeLinks).length + activeCreates.length > 0 && syncFrom !== ''
 
   function updateLink(pluggyAccountId: string, value: string) {
     const createKind = value === 'new:card' ? 'card' : value === 'new:account' ? 'account' : undefined
@@ -229,7 +229,13 @@ export function OpenFinancePage() {
         if (!pluggyAccount) continue
         finalLinks[pluggyAccountId] =
           kind === 'card'
-            ? { cardId: await createCard(workspaceId, cardDataFromPluggy(pluggyAccount, pluggyAccount.institution), user.uid) }
+            ? {
+                cardId: await createCard(
+                  workspaceId,
+                  cardDataFromPluggy(pluggyAccount, pluggyAccount.institution),
+                  user.uid,
+                ),
+              }
             : {
                 accountId: await createAccount(
                   workspaceId,
@@ -259,7 +265,8 @@ export function OpenFinancePage() {
 
   async function handleRemove() {
     if (!workspaceId || !user) return
-    if (!window.confirm('Remover a sua conexão bancária? Os lançamentos já importados continuam no app.')) return
+    if (!window.confirm('Remover a sua conexão bancária? Os lançamentos já importados continuam no app.'))
+      return
     await deletePluggyConfig(workspaceId, user.uid)
     setConfig(null)
     setClientId('')
@@ -310,14 +317,18 @@ export function OpenFinancePage() {
           ))}
           <p className="text-xs text-light-secondary dark:text-dark-secondary">
             O app sincroniza sozinho ao ser aberto (no máximo a cada 6 horas)
-            {otherConfigs.length > 0 ? ', as conexões de toda a família' : ''}. O banco atualiza o Meu
-            Pluggy uma vez por dia.
+            {otherConfigs.length > 0 ? ', as conexões de toda a família' : ''}. O banco atualiza o Meu Pluggy
+            uma vez por dia.
           </p>
           {syncMessage ? <p className="text-sm text-brand-500">{syncMessage}</p> : null}
           {syncError ? <p className="text-sm text-danger">{syncError}</p> : null}
           <Button type="button" onClick={runSync} disabled={syncing}>
             <RefreshCw size={18} className={cn(syncing && 'animate-spin')} />
-            {syncing ? 'Sincronizando...' : otherConfigs.length > 0 ? 'Sincronizar todas agora' : 'Sincronizar agora'}
+            {syncing
+              ? 'Sincronizando...'
+              : otherConfigs.length > 0
+                ? 'Sincronizar todas agora'
+                : 'Sincronizar agora'}
           </Button>
         </div>
       ) : null}
@@ -326,9 +337,9 @@ export function OpenFinancePage() {
         <div className="flex items-start gap-2 rounded-2xl border border-border-light p-3 text-xs text-light-secondary dark:border-border-dark dark:text-dark-secondary">
           <Users size={16} className="mt-0.5 shrink-0" />
           <p>
-            Modo família: cada pessoa configura aqui a <strong>sua</strong> conexão, entrando no app com
-            a própria conta e usando o próprio Meu Pluggy. Os lançamentos de todos caem no mesmo
-            workspace. Conta conjunta: basta uma pessoa vincular.
+            Modo família: cada pessoa configura aqui a <strong>sua</strong> conexão, entrando no app com a
+            própria conta e usando o próprio Meu Pluggy. Os lançamentos de todos caem no mesmo workspace.
+            Conta conjunta: basta uma pessoa vincular.
           </p>
         </div>
       ) : null}
@@ -344,8 +355,8 @@ export function OpenFinancePage() {
             <a href="https://meu.pluggy.ai" target="_blank" rel="noreferrer" className={EXTERNAL_LINK_CLASS}>
               Meu Pluggy <ExternalLink size={12} />
             </a>{' '}
-            e conecte seus bancos e cartões por lá. A autorização é feita pelo Open Finance, no app do
-            próprio banco.
+            e conecte seus bancos e cartões por lá. A autorização é feita pelo Open Finance, no app do próprio
+            banco.
           </li>
           <li>
             Entre no{' '}
@@ -357,20 +368,19 @@ export function OpenFinancePage() {
             >
               Dashboard da Pluggy <ExternalLink size={12} />
             </a>{' '}
-            <strong>com a mesma conta do Meu Pluggy</strong>. Lá dentro, abra a sua aplicação (pode ser a de demonstração) e copie o{' '}
-            <strong>Client ID</strong> e o <strong>Client Secret</strong>.
+            <strong>com a mesma conta do Meu Pluggy</strong>. Lá dentro, abra a sua aplicação (pode ser a de
+            demonstração) e copie o <strong>Client ID</strong> e o <strong>Client Secret</strong>.
           </li>
           <li>
             Ainda no Dashboard, em <strong>Applications → sua aplicação → Demo</strong>, toque em{' '}
-            <strong>Connect Account</strong>, escolha o conector <strong>MeuPluggy</strong> (não o do
-            banco) e entre com a sua conta do Meu Pluggy. Cada banco vira um item em{' '}
-            <strong>Connected Items</strong>: copie o <strong>Item ID de cada um</strong> — um código
-            como <code>6122de13-54da-43e6-…</code>, não o nome do banco. Os cartões de crédito vêm
-            dentro do item do banco deles.
+            <strong>Connect Account</strong>, escolha o conector <strong>MeuPluggy</strong> (não o do banco) e
+            entre com a sua conta do Meu Pluggy. Cada banco vira um item em <strong>Connected Items</strong>:
+            copie o <strong>Item ID de cada um</strong> — um código como <code>6122de13-54da-43e6-…</code>,
+            não o nome do banco. Os cartões de crédito vêm dentro do item do banco deles.
           </li>
           <li>
-            Cole as três informações abaixo, toque em <strong>Buscar contas</strong> e escolha para qual
-            conta ou cartão do app vão os lançamentos de cada conta do banco.
+            Cole as três informações abaixo, toque em <strong>Buscar contas</strong> e escolha para qual conta
+            ou cartão do app vão os lançamentos de cada conta do banco.
           </li>
         </ol>
         <p className="mt-3 text-xs text-light-secondary dark:text-dark-secondary">
@@ -429,14 +439,14 @@ export function OpenFinancePage() {
             </span>
           ) : (
             <span className="text-xs text-light-secondary dark:text-dark-secondary">
-              Só aparecem as contas e cartões dos bancos cujo Item ID estiver aqui. A autorização do
-              MeuPluggy vale 1 ano — depois, refaça o passo 3 (o Item ID pode mudar).
+              Só aparecem as contas e cartões dos bancos cujo Item ID estiver aqui. A autorização do MeuPluggy
+              vale 1 ano — depois, refaça o passo 3 (o Item ID pode mudar).
             </span>
           )}
         </div>
         <p className="text-xs text-light-secondary dark:text-dark-secondary">
-          As credenciais ficam salvas no app (membros da família também enxergam) e só dão
-          acesso de leitura aos dados que você autorizou no Meu Pluggy.
+          As credenciais ficam salvas no app (membros da família também enxergam) e só dão acesso de leitura
+          aos dados que você autorizou no Meu Pluggy.
         </p>
         <Button
           type="button"
@@ -572,7 +582,15 @@ export function OpenFinancePage() {
   )
 }
 
-function ConnectionStatus({ label, config, hideError }: { label: string; config: PluggyConfig; hideError: boolean }) {
+function ConnectionStatus({
+  label,
+  config,
+  hideError,
+}: {
+  label: string
+  config: PluggyConfig
+  hideError: boolean
+}) {
   return (
     <div className="flex flex-col gap-1">
       <div className="flex items-center gap-2">
@@ -580,7 +598,9 @@ function ConnectionStatus({ label, config, hideError }: { label: string; config:
         <p className="text-sm font-medium text-light-primary dark:text-dark-primary">{label}</p>
       </div>
       <p className="text-xs text-light-secondary dark:text-dark-secondary">
-        {config.lastSyncAt ? `Última sincronização: ${formatSyncDate(config.lastSyncAt)}.` : 'Ainda não sincronizado.'}
+        {config.lastSyncAt
+          ? `Última sincronização: ${formatSyncDate(config.lastSyncAt)}.`
+          : 'Ainda não sincronizado.'}
       </p>
       {config.lastSyncError && !hideError ? (
         <p className="text-xs text-danger">Última tentativa falhou: {config.lastSyncError}</p>

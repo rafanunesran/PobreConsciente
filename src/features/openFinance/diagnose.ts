@@ -2,7 +2,15 @@ import { getDocs } from 'firebase/firestore'
 import { todayDateString } from '../cards/invoiceUtils'
 import { transactionsCollection } from '../transactions/api'
 import { authenticate, listBills, listTransactions, type PluggyBill } from './pluggyClient'
-import { CARD_LOOKAHEAD_DAYS, daysBefore, isCardBillPayment, newBankEntries, toBankEntry, type BankEntry } from './sync'
+import {
+  CARD_LOOKAHEAD_DAYS,
+  daysBefore,
+  isCardBillPayment,
+  newBankEntries,
+  toBankEntry,
+  type BankEntry,
+} from './sync'
+import { ACCOUNT_WINDOW_DAYS, CARD_WINDOW_DAYS, isManualCandidate, pairBankWithManual } from './matching'
 import type { PluggyAccountLink, PluggyConfig } from './types'
 
 // Quanto pra trás o diagnóstico olha — além da data inicial, pra mostrar
@@ -64,7 +72,8 @@ export async function diagnoseLink(
   const scoped = transactionsSnap.docs
     .map((d) => d.data())
     .filter((t) => ('cardId' in link ? t.cardId === link.cardId : t.accountId === link.accountId))
-  const existingIds = new Set(scoped.map((t) => t.id))
+  // conciliado com um lançamento do app (bankRef) também conta como "no app"
+  const existingIds = new Set(scoped.flatMap((t) => (t.bankRef !== undefined ? [t.id, t.bankRef] : [t.id])))
 
   const rows: DiagnosticRow[] = []
   const candidates: { row: DiagnosticRow; entry: BankEntry }[] = []
@@ -90,10 +99,18 @@ export async function diagnoseLink(
     }
   }
 
-  // Mesma regra da sincronização pro que sobrou: igual a algo já lançado
-  // vira "duplicado", o resto é o que realmente falta.
-  const fresh = new Set(newBankEntries(candidates.map((c) => c.entry), scoped).map((e) => e.docId))
-  for (const { row, entry } of candidates) row.verdict = fresh.has(entry.docId) ? 'missing' : 'duplicate'
+  // Mesmas regras da sincronização pro que sobrou: igual a algo já vindo
+  // do banco, ou conciliável com um lançamento do app, vira "duplicate"
+  // (não seria importado); o resto é o que realmente falta.
+  const fresh = newBankEntries(
+    candidates.map((c) => c.entry),
+    scoped.filter((t) => t.id.startsWith('pluggy_') || t.bankRef !== undefined),
+  ).map((entry) => ({ ...entry, key: entry.docId }))
+  const windowDays = targetKind === 'account' ? ACCOUNT_WINDOW_DAYS : CARD_WINDOW_DAYS
+  const missing = new Set(
+    pairBankWithManual(fresh, scoped.filter(isManualCandidate), windowDays).unmatched.map((e) => e.docId),
+  )
+  for (const { row, entry } of candidates) row.verdict = missing.has(entry.docId) ? 'missing' : 'duplicate'
 
   rows.sort((a, b) => b.date.localeCompare(a.date))
   return { rows, bills, ...(billsError ? { billsError } : {}) }
