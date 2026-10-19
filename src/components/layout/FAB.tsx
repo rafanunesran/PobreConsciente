@@ -39,10 +39,10 @@ export function FAB() {
       action: () => navigate('/registros/receita/nova'),
     },
     {
-      label: 'Nova transação',
+      label: 'Transferência entre contas',
       icon: ArrowLeftRight,
       className: 'bg-violet-500/10 text-violet-500',
-      action: () => navigate('/registros/novo'),
+      action: () => navigate('/contas/transferir'),
     },
     {
       label: 'Calculadora',

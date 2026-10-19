@@ -5,6 +5,7 @@ import { BottomNav } from './BottomNav'
 import { Sidebar } from './Sidebar'
 import { FAB } from './FAB'
 import { Splash } from './Splash'
+import { Toast } from '../ui/Toast'
 import { useAuthStore } from '../../stores/authStore'
 import { useWorkspaceStore, syncWorkspace } from '../../stores/workspaceStore'
 import { upsertMyProfile } from '../../features/family/userProfiles'
@@ -83,6 +84,7 @@ export function AppShell() {
         </div>
       </div>
       <FAB />
+      <Toast />
       <BottomNav />
     </div>
   )

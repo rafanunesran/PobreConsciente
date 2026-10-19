@@ -5,6 +5,26 @@ import './index.css'
 // antes do primeiro paint, independente de qual rota carrega primeiro.
 import './stores/themeStore'
 import { StartupError } from './components/layout/StartupError'
+import { registerSW } from 'virtual:pwa-register'
+
+// NOTE: com registerType 'autoUpdate', registrar por aqui (em vez do script
+// injetado) faz a página recarregar sozinha assim que a versão nova do
+// service worker assume — antes a pessoa via a versão antiga do cache até
+// abrir o app uma segunda vez. O PWA instalado fica dias aberto em segundo
+// plano, então também checa por atualização ao voltar pro app e de hora em hora.
+registerSW({
+  immediate: true,
+  onRegisteredSW(_url, registration) {
+    if (!registration) return
+    const check = () => {
+      if (navigator.onLine) void registration.update().catch(() => undefined)
+    }
+    setInterval(check, 60 * 60 * 1000)
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') check()
+    })
+  },
+})
 
 const root = createRoot(document.getElementById('root')!)
 

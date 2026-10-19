@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useLocation, useNavigate, useParams } from 'react-router-dom'
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useAuthStore } from '../../stores/authStore'
@@ -10,7 +10,12 @@ import { useCategories } from '../categories/useCategories'
 import { Button } from '../../components/ui/Button'
 import { Input } from '../../components/ui/Input'
 import { Select } from '../../components/ui/Select'
-import { cn } from '../../lib/utils'
+import { cn, formatBRL } from '../../lib/utils'
+import { useToastStore } from '../../stores/toastStore'
+import { getDueDate, getInvoicePeriod } from '../cards/invoiceUtils'
+import { format } from 'date-fns'
+import { ptBR } from 'date-fns/locale'
+import type { RegistrosLocationState } from './RegistrosPage'
 import { categoryOptions } from '../categories/categoryTree'
 import { expenseSchema, incomeSchema, type ExpenseFormData, type IncomeFormData } from './schemas'
 import { createTransaction, deleteTransaction, getTransaction, updateTransaction } from './api'
@@ -47,6 +52,7 @@ export function TransactionFormPage() {
   const user = useAuthStore((state) => state.user)
   const workspaceId = useWorkspaceStore((state) => state.workspaceId)
 
+  const showToast = useToastStore((state) => state.show)
   const { accounts } = useAccounts(workspaceId ?? '')
   const { cards } = useCards(workspaceId ?? '')
   const { categories } = useCategories(workspaceId ?? '')
@@ -173,19 +179,42 @@ export function TransactionFormPage() {
   // Cria um lançamento avulso e anexa os comprovantes pendentes. Se o
   // anexo falhar, o lançamento já existe — abre a edição dele pra pessoa
   // tentar anexar de novo, em vez de perder o arquivo em silêncio.
-  // Devolve false quando já navegou pra edição (o caller não segue pro extrato).
-  async function createSingleWithAttachments(payload: TransactionFormData): Promise<boolean> {
-    if (!user || !workspaceId) return false
+  // Devolve null quando já navegou pra edição (o caller não segue pro extrato).
+  async function createSingleWithAttachments(payload: TransactionFormData): Promise<string | null> {
+    if (!user || !workspaceId) return null
     const newId = await createTransaction(workspaceId, payload, user.uid)
     try {
       for (const attachment of pendingAttachments) {
         await addAttachment(workspaceId, newId, attachment, user.uid)
       }
-      return true
+      return newId
     } catch {
       navigate(`/registros/${kind}/${newId}/editar`, { replace: true, state: { attachmentFailed: true } })
-      return false
+      return null
     }
+  }
+
+  // Depois de salvar: volta pro extrato NO MÊS em que o lançamento aparece
+  // (compra de cartão aparece no mês de vencimento da fatura, agregada nela),
+  // destaca a linha e confirma com um aviso — antes a pessoa caía no mês
+  // atual sem feedback e achava que o registro tinha sumido.
+  function goToStatement(
+    message: string,
+    date: string,
+    linkage: { accountId?: string; cardId?: string },
+    id?: string,
+  ) {
+    const card = linkage.cardId ? cards.find((c) => c.id === linkage.cardId) : undefined
+    let state: RegistrosLocationState = { month: date.slice(0, 7), highlightKey: id }
+    let text = message
+    if (card) {
+      const period = getInvoicePeriod(card.closingDay, date)
+      const dueDate = getDueDate(period.end, card.dueDay)
+      state = { month: dueDate.slice(0, 7), highlightKey: `${card.id}-${period.end}` }
+      text = `${message} na fatura ${card.name} (vence ${format(new Date(`${dueDate}T00:00:00`), "d 'de' MMM", { locale: ptBR })})`
+    }
+    showToast(text)
+    navigate('/registros', { state })
   }
 
   async function onSubmitExpense(data: ExpenseFormData) {
@@ -219,6 +248,7 @@ export function TransactionFormPage() {
           return
         }
         await updateTransaction(workspaceId, transactionId, payload)
+        goToStatement('Despesa atualizada', data.date, linkage, transactionId)
       } else if (data.recurrence === 'fixed') {
         await createRecurringTransaction(
           workspaceId,
@@ -234,6 +264,7 @@ export function TransactionFormPage() {
           paidOnCreate,
           user.uid,
         )
+        goToStatement(`Despesa fixa de ${formatBRL(data.amount)} criada, todo dia ${Number(data.date.slice(-2))}`, data.date, linkage)
       } else if (data.recurrence === 'installments') {
         await createInstallmentTransaction(
           workspaceId,
@@ -251,6 +282,7 @@ export function TransactionFormPage() {
           paidOnCreate,
           user.uid,
         )
+        goToStatement(`Despesa parcelada em ${data.installmentsCount ?? 2}x criada`, data.date, linkage)
       } else {
         const payload: TransactionFormData = {
           type: 'expense',
@@ -262,9 +294,10 @@ export function TransactionFormPage() {
           tags: data.tags ?? [],
           ...linkage,
         }
-        if (!(await createSingleWithAttachments(payload))) return
+        const newId = await createSingleWithAttachments(payload)
+        if (!newId) return
+        goToStatement(`Despesa de ${formatBRL(data.amount)} salva`, data.date, linkage, newId)
       }
-      navigate('/registros')
     } catch {
       setFormError('Não foi possível salvar a despesa. Tente novamente.')
     }
@@ -293,6 +326,7 @@ export function TransactionFormPage() {
           return
         }
         await updateTransaction(workspaceId, transactionId, payload)
+        goToStatement('Receita atualizada', data.date, { accountId: data.accountId }, transactionId)
       } else if (data.recurrence === 'fixed') {
         await createRecurringTransaction(
           workspaceId,
@@ -308,6 +342,7 @@ export function TransactionFormPage() {
           data.paid,
           user.uid,
         )
+        goToStatement(`Receita fixa de ${formatBRL(data.amount)} criada, todo dia ${Number(data.date.slice(-2))}`, data.date, { accountId: data.accountId })
       } else if (data.recurrence === 'installments') {
         await createInstallmentTransaction(
           workspaceId,
@@ -325,6 +360,7 @@ export function TransactionFormPage() {
           data.paid,
           user.uid,
         )
+        goToStatement(`Receita parcelada em ${data.installmentsCount ?? 2}x criada`, data.date, { accountId: data.accountId })
       } else {
         const payload: TransactionFormData = {
           type: 'income',
@@ -336,9 +372,10 @@ export function TransactionFormPage() {
           paid: data.paid,
           tags: data.tags ?? [],
         }
-        if (!(await createSingleWithAttachments(payload))) return
+        const newId = await createSingleWithAttachments(payload)
+        if (!newId) return
+        goToStatement(`Receita de ${formatBRL(data.amount)} salva`, data.date, { accountId: data.accountId }, newId)
       }
-      navigate('/registros')
     } catch {
       setFormError('Não foi possível salvar a receita. Tente novamente.')
     }
@@ -350,7 +387,8 @@ export function TransactionFormPage() {
     try {
       await deleteTransaction(workspaceId, transactionId)
       await deleteAttachmentsOf(workspaceId, [transactionId]).catch(() => undefined)
-      navigate('/registros')
+      showToast(`${isExpense ? 'Despesa' : 'Receita'} excluída`)
+      navigate('/registros', { state: { month: loadedTransaction?.date.slice(0, 7) } satisfies RegistrosLocationState })
     } catch {
       setFormError('Não foi possível excluir. Tente novamente.')
       setIsDeleting(false)
@@ -367,6 +405,13 @@ export function TransactionFormPage() {
     try {
       if (scopePrompt.action === 'edit') {
         await updateTransactionSeries(workspaceId, loadedTransaction, scopePrompt.payload, scope)
+        goToStatement(
+          `${isExpense ? 'Despesa' : 'Receita'} atualizada`,
+          scopePrompt.payload.date,
+          scopePrompt.payload,
+          loadedTransaction.id,
+        )
+        return
       } else {
         await deleteTransactionSeries(workspaceId, loadedTransaction, scope)
         // Mesmo critério de alcance de series.ts (isInScope): o próprio
@@ -378,8 +423,9 @@ export function TransactionFormPage() {
             : series.filter((t) => t.id !== loadedTransaction.id && (scope === 'all' || !t.paid)).map((t) => t.id)),
         ]
         await deleteAttachmentsOf(workspaceId, removedIds).catch(() => undefined)
+        showToast(removedIds.length > 1 ? `${removedIds.length} lançamentos excluídos` : 'Lançamento excluído')
+        navigate('/registros', { state: { month: loadedTransaction.date.slice(0, 7) } satisfies RegistrosLocationState })
       }
-      navigate('/registros')
     } catch {
       setScopeError(
         scopePrompt.action === 'edit'
@@ -450,6 +496,29 @@ export function TransactionFormPage() {
         <h1 className="text-xl font-semibold text-light-primary dark:text-dark-primary">
           {isEditMode ? 'Editar' : 'Nova'} {isExpense ? 'despesa' : 'receita'}
         </h1>
+        {isEditMode ? null : (
+          // Trocar de tipo sem voltar pro menu — a escolha errada era comum.
+          <div className="mt-2 grid grid-cols-2 gap-1 rounded-xl border border-border-light p-1 dark:border-border-dark">
+            {(['despesa', 'receita'] as const).map((k) => (
+              <Link
+                key={k}
+                to={`/registros/${k}/nova`}
+                replace
+                aria-current={kind === k ? 'page' : undefined}
+                className={cn(
+                  'rounded-lg py-2 text-center text-sm font-medium transition-colors duration-200',
+                  kind === k
+                    ? k === 'despesa'
+                      ? 'bg-danger text-white'
+                      : 'bg-brand-500 text-white'
+                    : 'text-light-secondary hover:text-light-primary dark:text-dark-secondary dark:hover:text-dark-primary',
+                )}
+              >
+                {k === 'despesa' ? 'Despesa (saída)' : 'Receita (entrada)'}
+              </Link>
+            ))}
+          </div>
+        )}
         {attachmentFailed ? (
           <p className="text-sm text-danger">
             O lançamento foi salvo, mas o comprovante não foi anexado. Tente anexar de novo abaixo.

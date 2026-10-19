@@ -13,7 +13,7 @@ export const navItems: NavItem[] = [
   { to: '/', label: 'Home', icon: Home, end: true },
   { to: '/cartoes', label: 'Cartões', icon: CreditCard, end: false },
   { to: '/contas', label: 'Contas', icon: Wallet, end: false },
-  { to: '/registros/novo', label: 'Extrato', icon: Receipt, end: false },
+  { to: '/registros', label: 'Extrato', icon: Receipt, end: false },
   { to: '/perfil', label: 'Perfil', icon: User, end: false },
 ]
 

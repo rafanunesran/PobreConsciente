@@ -48,7 +48,7 @@ export function TransactionSearchResults({
           Nenhum lançamento encontrado.
         </div>
       ) : (
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+        <div className="flex flex-col gap-2">
           {results.map((transaction) => (
             <TransactionCompactCard
               key={transaction.id}
