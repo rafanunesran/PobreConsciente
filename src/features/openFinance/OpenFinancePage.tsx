@@ -33,8 +33,17 @@ function valueToLink(value: string): PluggyAccountLink | undefined {
   return kind === 'card' ? { cardId: id } : { accountId: id }
 }
 
-function parseItemIds(raw: string): string[] {
-  return Array.from(new Set(raw.split(/[\s,;]+/).map((id) => id.trim()).filter(Boolean)))
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+// Uma entrada por linha (ou separada por vírgula). Valida o formato aqui
+// porque é fácil colar o nome do banco no lugar do código — a Pluggy só
+// responderia "Invalid id, not an uuid", sem dizer qual linha.
+function parseItemIds(raw: string): { ids: string[]; invalid: string[] } {
+  const entries = raw.split(/[\n,;]+/).map((entry) => entry.trim()).filter(Boolean)
+  return {
+    ids: Array.from(new Set(entries.filter((entry) => UUID_PATTERN.test(entry)))),
+    invalid: entries.filter((entry) => !UUID_PATTERN.test(entry)),
+  }
 }
 
 function formatSyncDate(iso: string): string {
@@ -136,8 +145,13 @@ export function OpenFinancePage() {
 
   if (!user || !workspaceId) return null
 
-  const itemIds = parseItemIds(itemIdsRaw)
-  const canFetch = !fetching && clientId.trim() !== '' && clientSecret.trim() !== '' && itemIds.length > 0
+  const { ids: itemIds, invalid: invalidItemIds } = parseItemIds(itemIdsRaw)
+  const canFetch =
+    !fetching &&
+    clientId.trim() !== '' &&
+    clientSecret.trim() !== '' &&
+    itemIds.length > 0 &&
+    invalidItemIds.length === 0
   // só vínculos de contas que a Pluggy de fato devolveu — um Item ID
   // removido leva junto os vínculos das contas dele.
   const activeLinks = Object.fromEntries(
@@ -303,7 +317,8 @@ export function OpenFinancePage() {
           <li>
             Ainda no Dashboard, abra o app de demonstração da aplicação, conecte usando o conector{' '}
             <strong>MeuPluggy</strong> e autorize. No menu (⋮) da conexão criada, copie o{' '}
-            <strong>Item ID</strong>. Faça isso enquanto o período de teste do Dashboard estiver ativo —
+            <strong>Item ID</strong> — um código como <code>6122de13-54da-43e6-…</code>, não o nome do
+            banco. Faça isso enquanto o período de teste do Dashboard estiver ativo —
             a conexão continua funcionando depois.
           </li>
           <li>
@@ -345,7 +360,7 @@ export function OpenFinancePage() {
         />
         <div className="flex flex-col gap-1.5">
           <label htmlFor="pluggyItemIds" className="text-sm text-light-secondary dark:text-dark-secondary">
-            Item ID(s) — um por linha, se tiver mais de um banco
+            Item ID — o código da conexão MeuPluggy (passo 3), não o nome do banco
           </label>
           <textarea
             id="pluggyItemIds"
@@ -353,8 +368,24 @@ export function OpenFinancePage() {
             spellCheck={false}
             value={itemIdsRaw}
             onChange={(e) => setItemIdsRaw(e.target.value)}
-            className="rounded-xl border border-border-light bg-surface-light px-4 py-2.5 font-mono text-sm text-light-primary outline-none transition-all duration-200 focus:border-brand-500 dark:border-border-dark dark:bg-surface-dark-elevated dark:text-dark-primary"
+            placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+            className={cn(
+              'rounded-xl border border-border-light bg-surface-light px-4 py-2.5 font-mono text-sm text-light-primary outline-none transition-all duration-200 focus:border-brand-500 dark:border-border-dark dark:bg-surface-dark-elevated dark:text-dark-primary',
+              invalidItemIds.length > 0 && 'border-danger focus:border-danger dark:border-danger',
+            )}
           />
+          {invalidItemIds.length > 0 ? (
+            <span className="text-sm text-danger">
+              {invalidItemIds.map((entry) => `"${entry}"`).join(', ')}{' '}
+              {invalidItemIds.length === 1 ? 'não é um Item ID' : 'não são Item IDs'}. O Item ID é um código
+              no mesmo formato do Client ID — veja o passo 3 acima. Os bancos conectados no Meu Pluggy
+              costumam vir todos numa conexão só, então em geral basta um Item ID.
+            </span>
+          ) : (
+            <span className="text-xs text-light-secondary dark:text-dark-secondary">
+              Tem mais de uma conexão MeuPluggy? Cole um Item ID por linha.
+            </span>
+          )}
         </div>
         <p className="text-xs text-light-secondary dark:text-dark-secondary">
           As credenciais ficam salvas no app (membros da família também enxergam) e só dão
