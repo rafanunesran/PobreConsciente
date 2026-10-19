@@ -27,11 +27,11 @@ const AUTO_SYNC_INTERVAL_MS = 6 * 60 * 60 * 1000
 // O que já foi importado é descartado pelo id/dedupe abaixo.
 const OVERLAP_DAYS = 7
 
-const CARD_LOOKAHEAD_DAYS = 45
+export const CARD_LOOKAHEAD_DAYS = 45
 
 const DESCRIPTION_MAX = 60 // mesmo teto do form de lançamento (schemas.ts)
 
-function daysBefore(date: string, days: number): string {
+export function daysBefore(date: string, days: number): string {
   const { year, month1based, day } = parseDate(date)
   const shifted = new Date(year, month1based - 1, day - days)
   return formatDate(shifted.getFullYear(), shifted.getMonth() + 1, shifted.getDate())
@@ -40,7 +40,7 @@ function daysBefore(date: string, days: number): string {
 // Pagamento da fatura aparece na conta do cartão como crédito — mas no app
 // quem registra isso é o fluxo "Pagar fatura" (débito na conta corrente).
 // Importar também do lado do cartão deixaria a fatura negativa.
-function isCardBillPayment(tx: PluggyTransaction): boolean {
+export function isCardBillPayment(tx: PluggyTransaction): boolean {
   return (
     tx.amount < 0 &&
     (tx.operationType === 'PAGAMENTO_FATURA' ||

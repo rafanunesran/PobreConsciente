@@ -10,6 +10,7 @@ import { useCards } from '../cards/useCards'
 import { createAccount } from '../accounts/api'
 import { createCard } from '../cards/api'
 import { accountDataFromPluggy, cardDataFromPluggy } from './createFromPluggy'
+import { DiagnosticPanel } from './DiagnosticPanel'
 import { useUserProfiles } from '../family/useUserProfiles'
 import { todayDateString } from '../cards/invoiceUtils'
 import { Button } from '../../components/ui/Button'
@@ -523,6 +524,20 @@ export function OpenFinancePage() {
                   </>
                 )}
               </select>
+              {(() => {
+                // só pra vínculo já salvo — é o que a sincronização usa
+                const savedLink = config?.links[pluggyAccount.id]
+                if (!config || !savedLink) return null
+                return (
+                  <DiagnosticPanel
+                    workspaceId={workspaceId}
+                    config={config}
+                    pluggyAccount={pluggyAccount}
+                    link={savedLink}
+                    card={'cardId' in savedLink ? cards.find((c) => c.id === savedLink.cardId) : undefined}
+                  />
+                )
+              })()}
             </div>
           ))}
 
