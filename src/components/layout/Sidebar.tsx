@@ -1,14 +1,14 @@
 import { NavLink } from 'react-router-dom'
 import { cn } from '../../lib/utils'
-import { moreNavItems, navItems } from './navItems'
+import { moreNavItems, navItems, profileNavItem } from './navItems'
 
 export function Sidebar() {
   return (
     <aside className="sticky top-0 hidden h-svh w-64 shrink-0 flex-col border-r border-border-light bg-surface-light p-6 dark:border-border-dark dark:bg-surface-dark lg:flex">
-      <p className="text-xl font-semibold text-brand-500">Pobre Consciente</p>
+      <p className="font-[family-name:var(--font-display)] text-xl font-bold text-brand-500">Pobre Consciente</p>
 
       <nav className="mt-8 flex flex-col gap-1">
-        {[...navItems, ...moreNavItems].map(({ to, label, icon: Icon, end }) => (
+        {[...navItems, ...moreNavItems, profileNavItem].map(({ to, label, icon: Icon, end }) => (
           <NavLink
             key={to}
             to={to}

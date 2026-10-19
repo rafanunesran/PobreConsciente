@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { FileText, MoreHorizontal, Plus, Receipt } from 'lucide-react'
+import { ChevronRight } from 'lucide-react'
 import { useAuthStore } from '../../stores/authStore'
 import { useWorkspaceStore } from '../../stores/workspaceStore'
 import { useAccounts } from '../accounts/useAccounts'
@@ -9,7 +9,8 @@ import { BalanceteCard } from '../transactions/BalanceteCard'
 import { currentYearMonth } from '../transactions/dateUtils'
 import { useCards } from '../cards/useCards'
 import { InvoicesSummaryCard } from '../cards/InvoicesSummaryCard'
-import { computeInvoiceMonth } from '../cards/invoiceUtils'
+import { computeInvoiceMonth, effectiveMonth, todayDateString } from '../cards/invoiceUtils'
+import { TransactionCompactCard } from '../transactions/TransactionCompactCard'
 import { useCategories } from '../categories/useCategories'
 import { CategorySpendingCard } from '../categories/CategorySpendingCard'
 import { useBudgets } from '../budgets/useBudgets'
@@ -18,12 +19,7 @@ import { UpcomingBillsCard } from '../reminders/UpcomingBillsCard'
 import { MonthSelector } from '../../components/ui/MonthSelector'
 import { formatBRL } from '../../lib/utils'
 
-const quickActions = [
-  { label: 'Adicionar', icon: Plus, to: '/registros/novo' },
-  { label: 'Fatura', icon: FileText, to: '/cartoes' },
-  { label: 'Extrato', icon: Receipt, to: '/registros' },
-  { label: 'Mais', icon: MoreHorizontal, to: '/perfil' },
-] as const
+const RECENT_COUNT = 5
 
 export function HomePage() {
   const user = useAuthStore((state) => state.user)
@@ -41,6 +37,34 @@ export function HomePage() {
     [cards, transactions, invoiceOffset],
   )
   const cardsById = useMemo(() => new Map(cards.map((c) => [c.id, c])), [cards])
+  const accountsById = useMemo(() => new Map(accounts.map((a) => [a.id, a])), [accounts])
+  const categoriesById = useMemo(() => new Map(categories.map((c) => [c.id, c])), [categories])
+
+  // Entrou/saiu: o que de fato mexeu nas contas no mês (mesmo critério do
+  // balancete — cartão só conta quando a fatura é paga).
+  const { entrou, saiu, pending, pendingTotal } = useMemo(() => {
+    let entrou = 0
+    let saiu = 0
+    for (const t of transactions) {
+      if (!t.paid || t.accountId === undefined || !t.date.startsWith(selectedMonth)) continue
+      if (t.type === 'income') entrou += t.amount
+      else saiu += t.amount
+    }
+    const pending = transactions.filter((t) => !t.paid && effectiveMonth(t, cardsById) === selectedMonth)
+    const pendingTotal = pending.reduce((sum, t) => sum + t.amount, 0)
+    return { entrou, saiu, pending, pendingTotal }
+  }, [transactions, selectedMonth, cardsById])
+
+  // O que acabou de ser lançado (até hoje — ignora parcelas/fixos futuros),
+  // compras de cartão incluídas uma a uma: é aqui que a pessoa confere que
+  // o registro entrou.
+  const recent = useMemo(() => {
+    const today = todayDateString()
+    return transactions
+      .filter((t) => t.date <= today)
+      .sort((a, b) => b.date.localeCompare(a.date))
+      .slice(0, RECENT_COUNT)
+  }, [transactions])
 
   if (!user || !workspaceId) return null
 
@@ -50,33 +74,77 @@ export function HomePage() {
 
   return (
     <div className="flex flex-col gap-6 px-6 pt-4">
+      <MonthSelector value={selectedMonth} onChange={setSelectedMonth} />
+
       <Link
         to="/saldo"
-        className="block rounded-2xl border border-border-light bg-surface-light p-6 transition-all duration-200 hover:border-brand-500 dark:border-border-dark dark:bg-gradient-to-b dark:from-surface-dark dark:to-surface-dark-elevated"
+        className="block rounded-3xl bg-brand-500 p-5 text-[#062a1e] transition-transform duration-200 active:scale-[0.99]"
       >
-        <p className="text-sm text-light-secondary dark:text-dark-secondary">Saldo atual</p>
-        <p className="mt-2 text-3xl font-semibold text-light-primary dark:text-dark-primary">
+        <p className="text-sm opacity-80">Saldo atual</p>
+        <p className="tabular mt-1 font-[family-name:var(--font-display)] text-4xl font-bold">
           {loading ? '···' : formatBRL(totalBalance)}
         </p>
-        <p className="mt-1 text-sm text-light-secondary dark:text-dark-secondary">
-          {accounts.length === 0 ? 'Nenhuma conta conectada ainda' : `${accounts.length} conta(s)`}
+        <div className="mt-4 flex gap-6 text-sm">
+          <div>
+            <p className="opacity-70">Entrou no mês</p>
+            <p className="tabular font-semibold">{formatBRL(entrou)}</p>
+          </div>
+          <div>
+            <p className="opacity-70">Saiu no mês</p>
+            <p className="tabular font-semibold">{formatBRL(saiu)}</p>
+          </div>
+        </div>
+        <p className="mt-3 text-xs opacity-70">
+          {accounts.length === 0 ? 'Nenhuma conta cadastrada ainda' : `${accounts.length} conta(s) · toque para ver a evolução`}
         </p>
       </Link>
 
-      <section className="flex justify-between">
-        {quickActions.map(({ label, icon: Icon, to }) => (
-          <Link key={label} to={to} className="flex flex-col items-center gap-2">
-            <span className="flex h-14 w-14 items-center justify-center rounded-full border border-border-light bg-surface-light text-brand-500 transition-all duration-200 hover:shadow-[0_0_20px_var(--color-brand-glow)] dark:border-border-dark dark:bg-surface-dark-elevated">
-              <Icon size={24} />
-            </span>
-            <span className="text-xs text-light-secondary dark:text-dark-secondary">{label}</span>
+      {pending.length > 0 ? (
+        <Link
+          to="/registros/pendentes"
+          className="flex items-center justify-between rounded-2xl border border-warning/30 bg-warning/10 p-4"
+        >
+          <div>
+            <p className="font-semibold text-warning">
+              {pending.length} pendente{pending.length > 1 ? 's' : ''} neste mês
+            </p>
+            <p className="text-sm text-light-secondary dark:text-dark-secondary">
+              {formatBRL(pendingTotal)} para pagar ou receber
+            </p>
+          </div>
+          <ChevronRight size={20} className="text-warning" />
+        </Link>
+      ) : null}
+
+      <section className="flex flex-col gap-2">
+        <div className="flex items-center justify-between">
+          <h2 className="font-semibold text-light-primary dark:text-dark-primary">Últimos lançamentos</h2>
+          <Link to="/registros" className="text-sm font-medium text-brand-500">
+            Ver extrato
           </Link>
-        ))}
+        </div>
+        {recent.length === 0 ? (
+          <div className="rounded-2xl border border-dashed border-border-light py-8 text-center text-sm text-light-secondary dark:border-border-dark dark:text-dark-secondary">
+            Nada lançado ainda. Toque em + para registrar uma despesa ou receita.
+          </div>
+        ) : (
+          <div className="divide-y divide-border-light overflow-hidden rounded-2xl border border-border-light bg-surface-light dark:divide-border-dark dark:border-transparent dark:bg-surface-dark-elevated">
+            {recent.map((t) => (
+              <TransactionCompactCard
+                key={t.id}
+                transaction={t}
+                category={categoriesById.get(t.categoryId)}
+                linkedName={
+                  t.accountId !== undefined ? accountsById.get(t.accountId)?.name : cardsById.get(t.cardId ?? '')?.name
+                }
+              />
+            ))}
+          </div>
+        )}
       </section>
 
       <UpcomingBillsCard transactions={transactions} cards={cards} />
 
-      <MonthSelector value={selectedMonth} onChange={setSelectedMonth} />
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <BalanceteCard transactions={transactions} selectedMonth={selectedMonth} cardsById={cardsById} />

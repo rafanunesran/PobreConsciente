@@ -238,7 +238,7 @@ export function CardInvoicePage() {
                 </button>
               </div>
 
-              <div className="flex flex-col gap-2">
+              <div className="rounded-2xl border border-border-light bg-surface-light divide-y divide-border-light overflow-hidden dark:border-transparent dark:bg-surface-dark-elevated dark:divide-border-dark">
                 {periodTransactions.map((transaction) => (
                   <TransactionCompactCard
                     key={transaction.id}

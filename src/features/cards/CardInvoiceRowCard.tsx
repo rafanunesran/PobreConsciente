@@ -2,7 +2,6 @@ import { Link } from 'react-router-dom'
 import { format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 import { CreditCard as CreditCardIcon } from 'lucide-react'
-import { Card } from '../../components/ui/Card'
 import { cn, formatBRL } from '../../lib/utils'
 import { PaymentStatusBadge } from '../transactions/PaymentStatusBadge'
 import type { CardInvoiceGroup } from './invoiceUtils'
@@ -32,13 +31,13 @@ export function CardInvoiceRowCard({ group, selected, onToggleSelect, highlighte
       <Link
         to={`/cartoes/${group.cardId}/fatura?offset=${group.periodOffset}`}
         aria-label={`Ver fatura ${group.cardName}`}
-        className="absolute inset-0 z-0 rounded-2xl"
+        className="absolute inset-0 z-0"
       />
-      <Card
+      <div
         className={cn(
-          'flex items-center gap-3 p-3',
-          selected && payable && 'border-brand-500',
-          highlighted && 'border-brand-500 ring-2 ring-brand-500/60',
+          'flex items-center gap-3 px-3 py-3 transition-colors duration-700',
+          selected && payable && 'bg-brand-500/10',
+          highlighted && 'bg-brand-500/20',
         )}
       >
         {payable ? (
@@ -50,7 +49,7 @@ export function CardInvoiceRowCard({ group, selected, onToggleSelect, highlighte
             className="relative z-10 h-4 w-4 shrink-0 accent-brand-500"
           />
         ) : null}
-        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-danger/10 text-danger">
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-violet-500/15 text-violet-400">
           <CreditCardIcon size={18} />
         </span>
         <div className="min-w-0 flex-1">
@@ -64,11 +63,11 @@ export function CardInvoiceRowCard({ group, selected, onToggleSelect, highlighte
         <div className="flex shrink-0 flex-col items-end gap-1">
           <p
             className={cn(
-              'whitespace-nowrap text-sm font-semibold',
-              group.unpaidAmount >= 0 ? 'text-danger' : 'text-brand-500',
+              'tabular whitespace-nowrap text-sm font-semibold',
+              group.unpaidAmount >= 0 ? 'text-light-primary dark:text-dark-primary' : 'text-brand-500',
             )}
           >
-            {group.unpaidAmount >= 0 ? '-' : '+'}
+            {group.unpaidAmount >= 0 ? '− ' : '+ '}
             {formatBRL(Math.abs(group.unpaidAmount))}
           </p>
           {payable ? (
@@ -82,7 +81,7 @@ export function CardInvoiceRowCard({ group, selected, onToggleSelect, highlighte
             <PaymentStatusBadge paid={false} type={group.unpaidAmount >= 0 ? 'expense' : 'income'} />
           )}
         </div>
-      </Card>
+      </div>
     </div>
   )
 }

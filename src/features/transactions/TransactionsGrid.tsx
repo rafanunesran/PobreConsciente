@@ -164,21 +164,23 @@ export function TransactionsGrid({
       <BulkPayBar bulk={bulk} accounts={accounts} />
 
       {pendingOnly ? null : (
-        <div className="grid grid-cols-3 gap-2 rounded-2xl border border-border-light bg-surface-light p-4 dark:border-border-dark dark:bg-surface-dark-elevated">
-          <div className="min-w-0">
-            <p className="text-xs text-light-secondary dark:text-dark-secondary">Despesas</p>
-            <p className="truncate text-sm font-semibold text-danger">{formatBRL(totalExpenses)}</p>
-          </div>
-          <div className="min-w-0">
-            <p className="text-xs text-light-secondary dark:text-dark-secondary">Receitas</p>
-            <p className="truncate text-sm font-semibold text-brand-500">{formatBRL(totalIncomes)}</p>
-          </div>
-          <div className="min-w-0 border-l border-border-light pl-2 dark:border-border-dark">
-            <p className="text-xs text-light-secondary dark:text-dark-secondary">Resultado</p>
-            <p className={cn('truncate text-sm font-semibold', resultado >= 0 ? 'text-brand-500' : 'text-danger')}>
-              {formatBRL(resultado)}
-            </p>
-          </div>
+        <div className="grid grid-cols-3 gap-2">
+          {[
+            { label: 'Receitas', value: totalIncomes, tone: 'text-brand-500' },
+            { label: 'Despesas', value: totalExpenses, tone: 'text-danger' },
+            { label: 'Saldo', value: resultado, tone: resultado >= 0 ? 'text-brand-500' : 'text-danger' },
+          ].map((stat) => (
+            <div
+              key={stat.label}
+              className="min-w-0 rounded-xl border border-border-light bg-surface-light px-3 py-2 dark:border-transparent dark:bg-surface-dark-elevated"
+            >
+              <p className="text-[11px] text-light-secondary dark:text-dark-secondary">{stat.label}</p>
+              <p className={cn('tabular truncate text-sm font-bold', stat.tone)}>
+                {stat.value < 0 ? '− ' : ''}
+                {formatBRL(Math.abs(stat.value))}
+              </p>
+            </div>
+          ))}
         </div>
       )}
 
@@ -192,7 +194,7 @@ export function TransactionsGrid({
               aria-selected={filter === f.value}
               onClick={() => setFilter(f.value)}
               className={cn(
-                'shrink-0 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors duration-200',
+                'shrink-0 rounded-full border px-4 py-1.5 text-sm font-medium transition-colors duration-200',
                 filter === f.value
                   ? 'border-brand-500 bg-brand-500 text-white'
                   : 'border-border-light text-light-secondary hover:text-light-primary dark:border-border-dark dark:text-dark-secondary dark:hover:text-dark-primary',
@@ -217,21 +219,22 @@ export function TransactionsGrid({
       ) : (
         <div className="flex flex-col gap-4">
           {days.map((day) => (
-            <section key={day.date} className="flex flex-col gap-2">
+            <section key={day.date} className="flex flex-col gap-1.5">
               <div className="flex items-baseline justify-between px-1">
-                <h3 className="text-xs font-semibold uppercase tracking-wide text-light-secondary first-letter:uppercase dark:text-dark-secondary">
+                <h3 className="text-sm font-semibold text-light-secondary first-letter:uppercase dark:text-dark-secondary">
                   {dayLabel(day.date)}
                 </h3>
                 <span
                   className={cn(
-                    'text-xs font-medium',
+                    'tabular text-xs font-medium',
                     day.total >= 0 ? 'text-brand-500' : 'text-light-secondary dark:text-dark-secondary',
                   )}
                 >
-                  {day.total >= 0 ? '+' : '-'}
+                  {day.total >= 0 ? '+ ' : '− '}
                   {formatBRL(Math.abs(day.total))}
                 </span>
               </div>
+              <div className="rounded-2xl border border-border-light bg-surface-light divide-y divide-border-light overflow-hidden dark:border-transparent dark:bg-surface-dark-elevated dark:divide-border-dark">
               {day.rows.map((row) => (
                 <div key={row.key} id={`row-${row.key}`} className="scroll-mt-24">
                   {row.kind === 'invoice' ? (
@@ -258,6 +261,7 @@ export function TransactionsGrid({
                   )}
                 </div>
               ))}
+              </div>
             </section>
           ))}
         </div>

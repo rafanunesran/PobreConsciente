@@ -1,21 +1,26 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowDownCircle, ArrowUpCircle, ArrowLeftRight, Calculator, Plus } from 'lucide-react'
+import { ArrowDownCircle, ArrowLeftRight, ArrowUpCircle, Calculator, Plus, X } from 'lucide-react'
 import { FloatingCalculator } from './FloatingCalculator'
+import { useQuickAddStore } from '../../stores/quickAddStore'
+import { cn } from '../../lib/utils'
 
 interface MenuItem {
-  label: string
+  title: string
+  description: string
   icon: typeof Plus
   className: string
   action: () => void
 }
 
+// Bottom sheet com as opções de lançamento. No mobile quem abre é o +
+// central da BottomNav; no desktop (sem bottom nav) o botão flutuante.
 export function FAB() {
   const navigate = useNavigate()
-  const [open, setOpen] = useState(false)
+  const open = useQuickAddStore((state) => state.open)
+  const setOpen = useQuickAddStore((state) => state.setOpen)
   const [calcOpen, setCalcOpen] = useState(false)
 
-  // Fecha o menu ao trocar de rota / ESC.
   useEffect(() => {
     if (!open) return
     function onKey(e: KeyboardEvent) {
@@ -23,31 +28,35 @@ export function FAB() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [open])
+  }, [open, setOpen])
 
   const items: MenuItem[] = [
     {
-      label: 'Nova despesa',
+      title: 'Despesa',
+      description: 'Gastos no débito, Pix, dinheiro ou cartão',
       icon: ArrowDownCircle,
-      className: 'bg-danger/10 text-danger',
+      className: 'bg-danger/15 text-danger',
       action: () => navigate('/registros/despesa/nova'),
     },
     {
-      label: 'Nova receita',
+      title: 'Receita',
+      description: 'Salário, freelas, rendimentos',
       icon: ArrowUpCircle,
-      className: 'bg-brand-500/10 text-brand-500',
+      className: 'bg-brand-500/15 text-brand-500',
       action: () => navigate('/registros/receita/nova'),
     },
     {
-      label: 'Transferência entre contas',
+      title: 'Transferência',
+      description: 'Mover dinheiro entre suas contas',
       icon: ArrowLeftRight,
-      className: 'bg-violet-500/10 text-violet-500',
+      className: 'bg-violet-500/15 text-violet-500',
       action: () => navigate('/contas/transferir'),
     },
     {
-      label: 'Calculadora',
+      title: 'Calculadora',
+      description: 'Fazer uma conta rápida',
       icon: Calculator,
-      className: 'bg-amber-500/10 text-amber-500',
+      className: 'bg-amber-500/15 text-amber-500',
       action: () => setCalcOpen(true),
     },
   ]
@@ -59,52 +68,61 @@ export function FAB() {
 
   return (
     <>
-      {/* Backdrop leve só pra fechar o menu ao clicar fora (o menu É modal;
-          a calculadora, aberta a partir dele, NÃO é). */}
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        aria-label="Novo lançamento"
+        className="fixed bottom-8 right-8 z-30 hidden h-14 w-14 items-center justify-center rounded-full bg-brand-500 text-white shadow-[0_0_20px_var(--color-brand-glow)] transition-all duration-200 hover:bg-brand-600 lg:flex"
+      >
+        <Plus size={28} />
+      </button>
+
       {open && (
-        <button
-          type="button"
-          aria-label="Fechar menu"
-          onClick={() => setOpen(false)}
-          className="fixed inset-0 z-20 cursor-default bg-black/20"
-        />
-      )}
-
-      <div className="fixed bottom-20 left-1/2 z-30 -translate-x-1/2 lg:bottom-8 lg:left-auto lg:right-8 lg:translate-x-0">
-        {open && (
-          <div className="absolute bottom-16 right-1/2 flex translate-x-1/2 flex-col items-end gap-2 lg:right-0 lg:translate-x-0">
-            {items.map((item) => (
+        <div className="fixed inset-0 z-40 flex items-end justify-center lg:items-center" role="dialog" aria-modal="true" aria-labelledby="quick-add-title">
+          <button
+            type="button"
+            aria-label="Fechar"
+            onClick={() => setOpen(false)}
+            className="absolute inset-0 cursor-default bg-black/60 backdrop-blur-sm"
+          />
+          <div className="relative w-full max-w-[480px] rounded-t-3xl border-t border-border-light bg-bg-light p-5 pb-8 dark:border-border-dark dark:bg-surface-dark lg:rounded-3xl lg:border">
+            <div className="mx-auto mb-4 h-1.5 w-10 rounded-full bg-border-light dark:bg-border-dark lg:hidden" />
+            <div className="mb-4 flex items-center justify-between">
+              <h2 id="quick-add-title" className="text-lg font-semibold text-light-primary dark:text-dark-primary">
+                O que você quer lançar?
+              </h2>
               <button
-                key={item.label}
                 type="button"
-                onClick={() => handleSelect(item)}
-                className="flex items-center gap-3 rounded-full border border-border-light bg-surface-light py-2 pl-4 pr-2 shadow-lg transition-transform duration-150 hover:scale-[1.02] dark:border-border-dark dark:bg-surface-dark-elevated"
+                onClick={() => setOpen(false)}
+                aria-label="Fechar"
+                className="rounded-full p-2 text-light-secondary hover:bg-border-light dark:text-dark-secondary dark:hover:bg-border-dark"
               >
-                <span className="whitespace-nowrap text-sm font-medium text-light-primary dark:text-dark-primary">
-                  {item.label}
-                </span>
-                <span
-                  className={`flex h-9 w-9 items-center justify-center rounded-full ${item.className}`}
-                >
-                  <item.icon size={20} />
-                </span>
+                <X size={20} />
               </button>
-            ))}
+            </div>
+            <div className="flex flex-col gap-2">
+              {items.map((item) => (
+                <button
+                  key={item.title}
+                  type="button"
+                  onClick={() => handleSelect(item)}
+                  className="flex w-full items-center gap-4 rounded-2xl bg-surface-light p-4 text-left transition-colors duration-200 hover:bg-border-light dark:bg-surface-dark-elevated dark:hover:bg-border-dark"
+                >
+                  <span className={cn('flex h-12 w-12 shrink-0 items-center justify-center rounded-xl', item.className)}>
+                    <item.icon size={24} />
+                  </span>
+                  <span>
+                    <span className="block font-semibold text-light-primary dark:text-dark-primary">{item.title}</span>
+                    <span className="block text-sm text-light-secondary dark:text-dark-secondary">
+                      {item.description}
+                    </span>
+                  </span>
+                </button>
+              ))}
+            </div>
           </div>
-        )}
-
-        <button
-          type="button"
-          onClick={() => setOpen((v) => !v)}
-          aria-label={open ? 'Fechar menu' : 'Adicionar'}
-          aria-expanded={open}
-          className="flex h-14 w-14 items-center justify-center rounded-full bg-brand-500 text-white shadow-[0_0_20px_var(--color-brand-glow)] transition-all duration-200 hover:bg-brand-600"
-        >
-          <span className={`transition-transform duration-200 ${open ? 'rotate-45' : ''}`}>
-            <Plus size={28} />
-          </span>
-        </button>
-      </div>
+        </div>
+      )}
 
       {calcOpen && <FloatingCalculator onClose={() => setCalcOpen(false)} />}
     </>

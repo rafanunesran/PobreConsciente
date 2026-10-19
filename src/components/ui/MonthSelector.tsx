@@ -28,18 +28,18 @@ export function MonthSelector({ value, onChange }: MonthSelectorProps) {
         type="button"
         aria-label="Mês anterior"
         onClick={() => onChange(shiftMonth(value, -1))}
-        className="flex h-9 w-9 items-center justify-center rounded-full border border-border-light text-light-secondary transition-colors duration-200 hover:text-light-primary dark:border-border-dark dark:text-dark-secondary dark:hover:text-dark-primary"
+        className="flex h-9 w-9 items-center justify-center rounded-full text-light-secondary transition-colors duration-200 hover:bg-border-light hover:text-light-primary dark:text-dark-secondary dark:hover:bg-border-dark dark:hover:text-dark-primary"
       >
         <ChevronLeft size={18} />
       </button>
-      <span className="min-w-[10rem] text-center text-sm font-medium capitalize text-light-primary dark:text-dark-primary">
+      <span className="min-w-[10rem] text-center font-[family-name:var(--font-display)] text-base font-bold capitalize text-light-primary dark:text-dark-primary">
         {label}
       </span>
       <button
         type="button"
         aria-label="Próximo mês"
         onClick={() => onChange(shiftMonth(value, 1))}
-        className="flex h-9 w-9 items-center justify-center rounded-full border border-border-light text-light-secondary transition-colors duration-200 hover:text-light-primary dark:border-border-dark dark:text-dark-secondary dark:hover:text-dark-primary"
+        className="flex h-9 w-9 items-center justify-center rounded-full text-light-secondary transition-colors duration-200 hover:bg-border-light hover:text-light-primary dark:text-dark-secondary dark:hover:bg-border-dark dark:hover:text-dark-primary"
       >
         <ChevronRight size={18} />
       </button>

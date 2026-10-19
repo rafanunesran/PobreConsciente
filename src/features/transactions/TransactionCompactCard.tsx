@@ -4,7 +4,6 @@ import { ptBR } from 'date-fns/locale'
 import { CheckCircle2, Receipt } from 'lucide-react'
 import { CATEGORY_ICON_COMPONENTS } from '../categories/types'
 import type { Category } from '../categories/types'
-import { Card } from '../../components/ui/Card'
 import { PaymentStatusBadge } from './PaymentStatusBadge'
 import { cn, formatBRL } from '../../lib/utils'
 import { useWorkspaceStore } from '../../stores/workspaceStore'
@@ -61,13 +60,14 @@ export function TransactionCompactCard({
     .join(' · ')
 
   // Linha única (ícone · descrição · valor à direita), no padrão dos apps
-  // de banco — legível no celular mesmo com descrição longa.
+  // de banco — legível no celular mesmo com descrição longa. Sem caixa
+  // própria: quem lista agrupa as linhas num bloco com divisórias.
   const content = (
-    <Card
+    <div
       className={cn(
-        'flex items-center gap-3 p-3 transition-shadow duration-500',
-        selected && (payable || selectMode) && 'border-brand-500',
-        highlighted && 'border-brand-500 ring-2 ring-brand-500/60',
+        'flex items-center gap-3 px-3 py-3 transition-colors duration-700',
+        selected && (payable || selectMode) && 'bg-brand-500/10',
+        highlighted && 'bg-brand-500/20',
       )}
     >
       {selectMode ? (
@@ -90,8 +90,8 @@ export function TransactionCompactCard({
         />
       ) : null}
       <span
-        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-white"
-        style={{ backgroundColor: category?.color ?? '#6B7280' }}
+        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl"
+        style={{ backgroundColor: `${category?.color ?? '#6B7280'}26`, color: category?.color ?? '#9CA3AF' }}
       >
         <Icon size={18} />
       </span>
@@ -111,11 +111,12 @@ export function TransactionCompactCard({
       <div className="flex shrink-0 flex-col items-end gap-1">
         <p
           className={cn(
-            'whitespace-nowrap text-sm font-semibold',
-            transaction.type === 'expense' ? 'text-danger' : 'text-brand-500',
+            'tabular whitespace-nowrap text-sm font-semibold',
+            transaction.type === 'expense' ? 'text-light-primary dark:text-dark-primary' : 'text-brand-500',
+            !transaction.paid && 'opacity-70',
           )}
         >
-          {transaction.type === 'expense' ? '-' : '+'}
+          {transaction.type === 'expense' ? '− ' : '+ '}
           {formatBRL(transaction.amount)}
         </p>
         {payable ? (
@@ -132,7 +133,7 @@ export function TransactionCompactCard({
           <PaymentStatusBadge paid={transaction.paid} type={transaction.type} />
         )}
       </div>
-    </Card>
+    </div>
   )
 
   if (selectMode) {
@@ -150,7 +151,7 @@ export function TransactionCompactCard({
   if (payable) {
     return (
       <div className="relative">
-        <Link to={editPath} aria-label={`Editar ${transaction.description}`} className="absolute inset-0 z-0 rounded-2xl" />
+        <Link to={editPath} aria-label={`Editar ${transaction.description}`} className="absolute inset-0 z-0" />
         {content}
       </div>
     )
