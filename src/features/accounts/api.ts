@@ -53,8 +53,9 @@ export function accountDoc(uid: string, accountId: string) {
   return doc(db, 'users', uid, 'accounts', accountId).withConverter(accountConverter)
 }
 
-export async function createAccount(uid: string, data: AccountFormData, createdBy: string): Promise<void> {
-  await addDoc(accountsCollection(uid), { id: '', currency: 'BRL', createdBy, ...data })
+export async function createAccount(uid: string, data: AccountFormData, createdBy: string): Promise<string> {
+  const ref = await addDoc(accountsCollection(uid), { id: '', currency: 'BRL', createdBy, ...data })
+  return ref.id
 }
 
 export async function updateAccount(

@@ -46,8 +46,9 @@ function cardDoc(uid: string, cardId: string) {
   return doc(db, 'users', uid, 'cards', cardId).withConverter(cardConverter)
 }
 
-export async function createCard(uid: string, data: CardFormData, createdBy: string): Promise<void> {
-  await addDoc(cardsCollection(uid), { id: '', createdBy, ...data })
+export async function createCard(uid: string, data: CardFormData, createdBy: string): Promise<string> {
+  const ref = await addDoc(cardsCollection(uid), { id: '', createdBy, ...data })
+  return ref.id
 }
 
 export async function updateCard(uid: string, cardId: string, data: CardFormData): Promise<void> {

@@ -39,6 +39,12 @@ export interface PluggyAccount {
   marketingName?: string | null
   number?: string
   balance?: number
+  creditData?: {
+    brand?: string | null
+    creditLimit?: number | null
+    balanceCloseDate?: string | null // 'YYYY-MM-DD'
+    balanceDueDate?: string | null // 'YYYY-MM-DD'
+  } | null
 }
 
 export interface PluggyTransaction {

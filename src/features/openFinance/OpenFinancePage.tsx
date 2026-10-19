@@ -7,6 +7,9 @@ import { useAuthStore } from '../../stores/authStore'
 import { useWorkspaceStore } from '../../stores/workspaceStore'
 import { useAccounts } from '../accounts/useAccounts'
 import { useCards } from '../cards/useCards'
+import { createAccount } from '../accounts/api'
+import { createCard } from '../cards/api'
+import { accountDataFromPluggy, cardDataFromPluggy } from './createFromPluggy'
 import { useUserProfiles } from '../family/useUserProfiles'
 import { todayDateString } from '../cards/invoiceUtils'
 import { Button } from '../../components/ui/Button'
@@ -21,7 +24,8 @@ interface FoundAccount extends PluggyAccount {
   institution: string
 }
 
-// valor do <select> de vínculo: '' (não importar), 'account:<id>' ou 'card:<id>'
+// valor do <select> de vínculo: '' (não importar), 'account:<id>', 'card:<id>'
+// ou 'new:card' / 'new:account' (criar no app ao salvar — ver handleSave)
 function linkToValue(link: PluggyAccountLink | undefined): string {
   if (!link) return ''
   return 'accountId' in link ? `account:${link.accountId}` : `card:${link.cardId}`
@@ -72,6 +76,8 @@ export function OpenFinancePage() {
   const [itemIdsRaw, setItemIdsRaw] = useState('')
   const [syncFrom, setSyncFrom] = useState(todayDateString())
   const [links, setLinks] = useState<Record<string, PluggyAccountLink>>({})
+  // contas da Pluggy marcadas como "criar novo" — viram cartão/conta no app só ao salvar
+  const [toCreate, setToCreate] = useState<Record<string, 'card' | 'account'>>({})
 
   const [found, setFound] = useState<FoundAccount[] | null>(null)
   const [fetching, setFetching] = useState(false)
@@ -157,16 +163,35 @@ export function OpenFinancePage() {
   const activeLinks = Object.fromEntries(
     Object.entries(links).filter(([pluggyAccountId]) => found?.some((a) => a.id === pluggyAccountId)),
   )
-  const canSave = !saving && found !== null && Object.keys(activeLinks).length > 0 && syncFrom !== ''
+  const activeCreates = Object.entries(toCreate).filter(([pluggyAccountId]) =>
+    found?.some((a) => a.id === pluggyAccountId),
+  )
+  const canSave =
+    !saving &&
+    found !== null &&
+    Object.keys(activeLinks).length + activeCreates.length > 0 &&
+    syncFrom !== ''
 
   function updateLink(pluggyAccountId: string, value: string) {
+    const createKind = value === 'new:card' ? 'card' : value === 'new:account' ? 'account' : undefined
+    setToCreate((current) => {
+      const next = { ...current }
+      if (createKind) next[pluggyAccountId] = createKind
+      else delete next[pluggyAccountId]
+      return next
+    })
     setLinks((current) => {
       const next = { ...current }
-      const link = valueToLink(value)
+      const link = createKind ? undefined : valueToLink(value)
       if (link) next[pluggyAccountId] = link
       else delete next[pluggyAccountId]
       return next
     })
+  }
+
+  function selectValue(pluggyAccountId: string): string {
+    const createKind = toCreate[pluggyAccountId]
+    return createKind ? `new:${createKind}` : linkToValue(links[pluggyAccountId])
   }
 
   async function runSync() {
@@ -195,11 +220,31 @@ export function OpenFinancePage() {
     setSaving(true)
     setSaveError(null)
     try {
+      // Cria primeiro o que foi marcado como "criar novo" e vincula ao id
+      // recém-criado — o vínculo salvo é sempre com algo que já existe.
+      const finalLinks = { ...activeLinks }
+      for (const [pluggyAccountId, kind] of activeCreates) {
+        const pluggyAccount = found?.find((a) => a.id === pluggyAccountId)
+        if (!pluggyAccount) continue
+        finalLinks[pluggyAccountId] =
+          kind === 'card'
+            ? { cardId: await createCard(workspaceId, cardDataFromPluggy(pluggyAccount, pluggyAccount.institution), user.uid) }
+            : {
+                accountId: await createAccount(
+                  workspaceId,
+                  accountDataFromPluggy(pluggyAccount, pluggyAccount.institution),
+                  user.uid,
+                ),
+              }
+      }
+      setLinks(finalLinks)
+      setToCreate({})
+
       await savePluggyConfig(workspaceId, user.uid, {
         clientId: clientId.trim(),
         clientSecret: clientSecret.trim(),
         itemIds,
-        links: activeLinks,
+        links: finalLinks,
         syncFrom,
       })
       await reloadConfigs()
@@ -302,7 +347,7 @@ export function OpenFinancePage() {
             próprio banco.
           </li>
           <li>
-            Crie uma conta de desenvolvedor no{' '}
+            Entre no{' '}
             <a
               href="https://dashboard.pluggy.ai"
               target="_blank"
@@ -310,16 +355,17 @@ export function OpenFinancePage() {
               className={EXTERNAL_LINK_CLASS}
             >
               Dashboard da Pluggy <ExternalLink size={12} />
-            </a>
-            . Lá dentro, abra a sua aplicação (pode ser a de demonstração) e copie o{' '}
+            </a>{' '}
+            <strong>com a mesma conta do Meu Pluggy</strong>. Lá dentro, abra a sua aplicação (pode ser a de demonstração) e copie o{' '}
             <strong>Client ID</strong> e o <strong>Client Secret</strong>.
           </li>
           <li>
-            Ainda no Dashboard, abra o app de demonstração da aplicação, conecte usando o conector{' '}
-            <strong>MeuPluggy</strong> e autorize. No menu (⋮) da conexão criada, copie o{' '}
-            <strong>Item ID</strong> — um código como <code>6122de13-54da-43e6-…</code>, não o nome do
-            banco. Faça isso enquanto o período de teste do Dashboard estiver ativo —
-            a conexão continua funcionando depois.
+            Ainda no Dashboard, em <strong>Applications → sua aplicação → Demo</strong>, toque em{' '}
+            <strong>Connect Account</strong>, escolha o conector <strong>MeuPluggy</strong> (não o do
+            banco) e entre com a sua conta do Meu Pluggy. Cada banco vira um item em{' '}
+            <strong>Connected Items</strong>: copie o <strong>Item ID de cada um</strong> — um código
+            como <code>6122de13-54da-43e6-…</code>, não o nome do banco. Os cartões de crédito vêm
+            dentro do item do banco deles.
           </li>
           <li>
             Cole as três informações abaixo, toque em <strong>Buscar contas</strong> e escolha para qual
@@ -360,7 +406,7 @@ export function OpenFinancePage() {
         />
         <div className="flex flex-col gap-1.5">
           <label htmlFor="pluggyItemIds" className="text-sm text-light-secondary dark:text-dark-secondary">
-            Item ID — o código da conexão MeuPluggy (passo 3), não o nome do banco
+            Item IDs — um por banco, um por linha (passo 3)
           </label>
           <textarea
             id="pluggyItemIds"
@@ -378,12 +424,12 @@ export function OpenFinancePage() {
             <span className="text-sm text-danger">
               {invalidItemIds.map((entry) => `"${entry}"`).join(', ')}{' '}
               {invalidItemIds.length === 1 ? 'não é um Item ID' : 'não são Item IDs'}. O Item ID é um código
-              no mesmo formato do Client ID — veja o passo 3 acima. Os bancos conectados no Meu Pluggy
-              costumam vir todos numa conexão só, então em geral basta um Item ID.
+              no mesmo formato do Client ID — veja o passo 3 acima.
             </span>
           ) : (
             <span className="text-xs text-light-secondary dark:text-dark-secondary">
-              Tem mais de uma conexão MeuPluggy? Cole um Item ID por linha.
+              Só aparecem as contas e cartões dos bancos cujo Item ID estiver aqui. A autorização do
+              MeuPluggy vale 1 ano — depois, refaça o passo 3 (o Item ID pode mudar).
             </span>
           )}
         </div>
@@ -431,11 +477,16 @@ export function OpenFinancePage() {
               </div>
               <select
                 aria-label="Destino no app"
-                value={linkToValue(links[pluggyAccount.id])}
+                value={selectValue(pluggyAccount.id)}
                 onChange={(e) => updateLink(pluggyAccount.id, e.target.value)}
                 className={selectClass}
               >
                 <option value="">Não importar</option>
+                <option value={pluggyAccount.type === 'CREDIT' ? 'new:card' : 'new:account'}>
+                  {pluggyAccount.type === 'CREDIT'
+                    ? '+ Criar cartão novo com os dados do banco'
+                    : '+ Criar conta nova com o saldo do banco'}
+                </option>
                 {pluggyAccount.type === 'CREDIT' ? (
                   <>
                     <optgroup label="Cartões">
