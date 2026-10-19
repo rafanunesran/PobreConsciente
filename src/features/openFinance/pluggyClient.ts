@@ -95,3 +95,19 @@ export async function listTransactions(
 
   return all
 }
+
+export interface PluggyBill {
+  id: string
+  dueDate: string // ISO
+  totalAmount: number
+}
+
+// Faturas já fechadas do cartão (a em aberto não é uma Bill) — nem toda
+// instituição devolve; erro aqui não deve derrubar quem chama.
+export async function listBills(apiKey: string, accountId: string): Promise<PluggyBill[]> {
+  const { results } = await request<{ results: PluggyBill[] }>(
+    `/bills?accountId=${encodeURIComponent(accountId)}`,
+    { headers: { 'X-API-KEY': apiKey } },
+  )
+  return results
+}
