@@ -23,7 +23,8 @@ import {
   removeLegacyCaixinhaTransactions,
   type ReserveItem,
 } from './caixinhaSync'
-import { parseReserveMovement } from './reserveParsing'
+import { parseReserveMovement, type ReserveMovement } from './reserveParsing'
+import { type CaixinhaRule, findCaixinhaRule, listCaixinhaRules } from '../caixinhas/rules'
 import { authenticate, listAccounts, listInvestments, listTransactions } from './pluggyClient'
 import {
   ACCOUNT_WINDOW_DAYS,
@@ -192,6 +193,8 @@ interface SyncContext {
   cardIds: Set<string>
   cards: CreditCard[]
   movementsById: Map<string, CaixinhaMovement>
+  // "esta movimentação é a caixinha X" marcadas pela pessoa (caixinhas/rules.ts)
+  caixinhaRules: CaixinhaRule[]
   // saldo informado pelo banco por conta do app — aplicado no fim (ver runSync)
   bankBalances: Map<string, number>
   // cresce a cada conexão importada: se marido e mulher vincularem a mesma
@@ -321,10 +324,26 @@ async function fetchConnection(ctx: SyncContext, config: PluggyConfig): Promise<
 // em contas diferentes "virariam" transferência. Caixinha e pagamento de
 // fatura têm tratamento próprio e ficam de fora.
 
-function isTransferCandidate(entry: { description: string; type: TransactionType }): boolean {
+// Guardar/resgatar caixinha: primeiro a marcação da pessoa pra essa
+// descrição nessa conta; senão, o que a descrição diz.
+function reserveMovementOf(
+  ctx: SyncContext,
+  accountId: string,
+  entry: { description: string; type: TransactionType },
+): ReserveMovement | null {
+  const rule = findCaixinhaRule(ctx.caixinhaRules, accountId, entry)
+  if (rule) return { kind: rule.type === 'expense' ? 'guardar' : 'resgatar', caixinhaId: rule.caixinhaId }
+  return parseReserveMovement(entry)
+}
+
+function isTransferCandidate(
+  ctx: SyncContext,
+  accountId: string,
+  entry: { description: string; type: TransactionType },
+): boolean {
   return (
     TRANSFER_DESCRIPTION.test(entry.description) &&
-    parseReserveMovement(entry) === null &&
+    reserveMovementOf(ctx, accountId, entry) === null &&
     !looksLikeBillPayment(entry.description)
   )
 }
@@ -350,13 +369,13 @@ async function detectTransfers(
       // Pix/TED pra (ou de) alguém da família — mesmo sem a conta do outro
       // conectada, o dinheiro não saiu da casa (ver FamilyIdentity)
       if (
-        parseReserveMovement(entry) === null &&
+        reserveMovementOf(ctx, f.link.accountId, entry) === null &&
         isFamilyCounterpart(f.counterparts.get(entry.docId), entry.description, family)
       ) {
         skip.add(entry.docId)
         continue
       }
-      if (isTransferCandidate(entry))
+      if (isTransferCandidate(ctx, f.link.accountId, entry))
         sides.push({ key: entry.docId, appAccountId: f.link.accountId, ...entry })
     }
   }
@@ -364,11 +383,14 @@ async function detectTransfers(
   // receita/despesa antes desta regra existir
   for (const t of ctx.transactions) {
     if (!t.id.startsWith('pluggy_') || t.accountId === undefined || seen.has(t.id)) continue
-    if (parseReserveMovement(t) === null && isFamilyCounterpart(undefined, t.description, family)) {
+    if (
+      reserveMovementOf(ctx, t.accountId, t) === null &&
+      isFamilyCounterpart(undefined, t.description, family)
+    ) {
       skip.add(t.id)
       continue
     }
-    if (!isTransferCandidate(t)) continue
+    if (!isTransferCandidate(ctx, t.accountId, t)) continue
     sides.push({ key: t.id, appAccountId: t.accountId, date: t.date, type: t.type, amount: t.amount })
   }
   for (const key of findTransferPairs(sides)) skip.add(key)
@@ -506,13 +528,17 @@ async function runSync(
   const configs = (await listPluggyConfigs(workspaceId)).filter(shouldSync)
   if (configs.length === 0) return { imported: 0, errors: [] }
 
-  const [accountsSnap, cardsSnap, categoriesSnap, transactionsSnap, movementsSnap] = await Promise.all([
-    getDocs(accountsCollection(workspaceId)),
-    getDocs(cardsCollection(workspaceId)),
-    getDocs(categoriesCollection(workspaceId)),
-    getDocs(transactionsCollection(workspaceId)),
-    getDocs(caixinhaMovementsCollection(workspaceId)),
-  ])
+  const [accountsSnap, cardsSnap, categoriesSnap, transactionsSnap, movementsSnap, caixinhaRules] =
+    await Promise.all([
+      getDocs(accountsCollection(workspaceId)),
+      getDocs(cardsCollection(workspaceId)),
+      getDocs(categoriesCollection(workspaceId)),
+      getDocs(transactionsCollection(workspaceId)),
+      getDocs(caixinhaMovementsCollection(workspaceId)),
+      // regras novas não têm permissão ainda se o firestore.rules não foi
+      // publicado — segue só com a leitura da descrição
+      listCaixinhaRules(workspaceId).catch(() => [] as CaixinhaRule[]),
+    ])
   const categories = categoriesSnap.docs.map((d) => d.data())
   const transactions = transactionsSnap.docs.map((d) => d.data())
   const ctx: SyncContext = {
@@ -522,6 +548,7 @@ async function runSync(
     cardIds: new Set(cardsSnap.docs.map((d) => d.id)),
     cards: cardsSnap.docs.map((d) => d.data()),
     movementsById: new Map(movementsSnap.docs.map((d) => [d.id, d.data()])),
+    caixinhaRules,
     bankBalances: new Map(),
     transactions,
     suggest: buildCategorySuggester(transactions),
@@ -574,7 +601,8 @@ async function runSync(
   if (failed.size > 0) {
     for (const f of fetched) {
       for (const entry of f.entries)
-        if (f.targetKind === 'account' && isTransferCandidate(entry)) transferKeys.add(entry.docId)
+        if ('accountId' in f.link && isTransferCandidate(ctx, f.link.accountId, entry))
+          transferKeys.add(entry.docId)
     }
   }
 
@@ -589,7 +617,7 @@ async function runSync(
       if (!('accountId' in f.link) || failed.has(f.config.ownerUid)) continue
       for (const entry of f.entries) {
         if (transferKeys.has(entry.docId) || seen.has(entry.docId)) continue
-        const movement = parseReserveMovement(entry)
+        const movement = reserveMovementOf(ctx, f.link.accountId, entry)
         if (!movement) continue
         seen.add(entry.docId)
         transferKeys.add(entry.docId)
@@ -605,7 +633,7 @@ async function runSync(
     }
     for (const t of ctx.transactions) {
       if (!t.id.startsWith('pluggy_') || t.accountId === undefined || seen.has(t.id)) continue
-      const movement = parseReserveMovement(t)
+      const movement = reserveMovementOf(ctx, t.accountId, t)
       if (!movement) continue
       items.push({
         key: t.id,

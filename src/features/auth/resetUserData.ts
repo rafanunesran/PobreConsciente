@@ -11,6 +11,7 @@ const USER_COLLECTIONS = [
   'recurringRules',
   'caixinhas',
   'caixinhaMovements',
+  'caixinhaRules',
   'budgets',
   'attachments',
   'integrations',

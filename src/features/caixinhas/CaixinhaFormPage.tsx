@@ -9,6 +9,7 @@ import { Input } from '../../components/ui/Input'
 import { caixinhaSchema, type CaixinhaFormData } from './schemas'
 import { createCaixinha, getCaixinha, updateCaixinha } from './api'
 import { closeCaixinha } from './caixinhaTransfers'
+import { deleteCaixinhaRulesOf } from './rules'
 
 export function CaixinhaFormPage() {
   const navigate = useNavigate()
@@ -78,6 +79,7 @@ export function CaixinhaFormPage() {
     setIsClosing(true)
     try {
       await closeCaixinha(workspaceId, accountId, caixinhaId)
+      await deleteCaixinhaRulesOf(workspaceId, caixinhaId).catch(() => undefined)
       navigate(`/contas/${accountId}`)
     } catch {
       setFormError('Não foi possível encerrar a caixinha. Tente novamente.')
