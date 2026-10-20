@@ -153,3 +153,41 @@ export function pairBankWithManual<B extends BankSide>(
 export function looksLikeBillPayment(description: string): boolean {
   return /fatura|pagamento\s+(de\s+)?cart[aã]o|pagto\.?\s+cart[aã]o/i.test(description)
 }
+
+// Transferência entre contas da própria família: sai de uma conta e entra
+// em outra (as duas vinculadas) com o mesmo valor, em poucos dias. No app,
+// transferência entre contas não é receita nem despesa (ver
+// accounts/accountTransfers.ts) — nenhum dos dois lados vira lançamento.
+export const TRANSFER_WINDOW_DAYS = 3
+
+export interface TransferSide {
+  key: string
+  appAccountId: string
+  date: string
+  type: TransactionType
+  amount: number
+}
+
+// Pares saída × entrada em contas diferentes, datas mais próximas primeiro;
+// cada lançamento entra em no máximo um par. Devolve as chaves pareadas.
+export function findTransferPairs(sides: TransferSide[]): Set<string> {
+  const outs = sides.filter((s) => s.type === 'expense')
+  const ins = sides.filter((s) => s.type === 'income')
+  const options: { out: TransferSide; in: TransferSide; distance: number }[] = []
+  for (const out of outs) {
+    for (const incoming of ins) {
+      if (out.appAccountId === incoming.appAccountId) continue
+      if (Math.abs(out.amount - incoming.amount) >= AMOUNT_EPSILON) continue
+      const distance = dayDistance(out.date, incoming.date)
+      if (distance <= TRANSFER_WINDOW_DAYS) options.push({ out, in: incoming, distance })
+    }
+  }
+  options.sort((a, b) => a.distance - b.distance)
+  const paired = new Set<string>()
+  for (const option of options) {
+    if (paired.has(option.out.key) || paired.has(option.in.key)) continue
+    paired.add(option.out.key)
+    paired.add(option.in.key)
+  }
+  return paired
+}

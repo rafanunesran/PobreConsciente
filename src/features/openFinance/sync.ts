@@ -10,18 +10,22 @@ import { categoriesCollection } from '../categories/api'
 import { buildCategorySuggester } from '../imports/categorize'
 import { importTransactions } from '../imports/api'
 import type { ParsedEntry, ReviewedEntry } from '../imports/types'
-import { transactionsCollection } from '../transactions/api'
+import { transactionDoc, transactionsCollection } from '../transactions/api'
 import { formatDate, parseDate, roundToCents } from '../transactions/dateUtils'
 import type { Transaction, TransactionType } from '../transactions/types'
 import { listPluggyConfigs, recordPluggySync } from './api'
 import { applyBankReserveMovements } from './caixinhaSync'
+import { parseReserveMovement } from './reserveParsing'
 import { authenticate, listAccounts, listTransactions } from './pluggyClient'
 import {
   ACCOUNT_WINDOW_DAYS,
   CARD_WINDOW_DAYS,
+  findTransferPairs,
   isManualCandidate,
   looksLikeBillPayment,
   pairBankWithManual,
+  TRANSFER_WINDOW_DAYS,
+  type TransferSide,
 } from './matching'
 import { autoPayCardBill, linkManualToBank, mergeImportedDuplicates } from './reconcile'
 import type { PluggyAccount, PluggyAccountLink, PluggyConfig, PluggyTransaction } from './types'
@@ -184,15 +188,36 @@ interface SyncContext {
   firstCategory: Record<TransactionType, string | undefined>
 }
 
-async function syncConnection(ctx: SyncContext, config: PluggyConfig): Promise<number> {
+// O que foi lido da Pluggy pra uma conta vinculada, antes de gravar nada.
+interface FetchedLink {
+  config: PluggyConfig
+  pluggyAccountId: string
+  link: PluggyAccountLink
+  targetKind: 'account' | 'card'
+  // a partir da data de início (o que pode ser importado)
+  entries: BankEntry[]
+  // alguns dias antes também — só pra achar o outro lado de uma
+  // transferência que caiu logo antes da janela
+  pairingEntries: BankEntry[]
+  // id do documento → quem pagou e quem recebeu têm o mesmo CPF/CNPJ
+  ownTransferKeys: Set<string>
+  pluggyAccount?: PluggyAccount
+}
+
+function sameDocument(tx: PluggyTransaction): boolean {
+  const payer = tx.paymentData?.payer?.documentNumber?.value?.replace(/\D/g, '')
+  const receiver = tx.paymentData?.receiver?.documentNumber?.value?.replace(/\D/g, '')
+  return Boolean(payer && receiver && payer === receiver)
+}
+
+// Fase 1: lê da Pluggy tudo de uma conexão (sem gravar nada).
+async function fetchConnection(ctx: SyncContext, config: PluggyConfig): Promise<FetchedLink[]> {
   const linkEntries = Object.entries(config.links)
-  if (linkEntries.length === 0) return 0
+  if (linkEntries.length === 0) return []
 
   const today = todayDateString()
   const overlapStart = config.lastSyncAt ? daysBefore(config.lastSyncAt.slice(0, 10), OVERLAP_DAYS) : ''
-
   const apiKey = await authenticate(config.clientId, config.clientSecret)
-  let imported = 0
 
   // Contas da Pluggy (pra saber o saldo atual de cada uma) — uma chamada
   // por banco conectado.
@@ -201,8 +226,7 @@ async function syncConnection(ctx: SyncContext, config: PluggyConfig): Promise<n
     for (const account of await listAccounts(apiKey, itemId)) pluggyAccounts.set(account.id, account)
   }
 
-  // Sequencial: uma conta por vez, cada uma no seu writeBatch (mesmo
-  // motivo de importTransactions — o incremento de saldo é por destino).
+  const fetched: FetchedLink[] = []
   for (const [pluggyAccountId, link] of linkEntries) {
     // conta/cartão apagado no app depois do vínculo — pula em vez de
     // derrubar a sincronização inteira no update de saldo.
@@ -214,106 +238,182 @@ async function syncConnection(ctx: SyncContext, config: PluggyConfig): Promise<n
     const dateTo = targetKind === 'card' ? daysBefore(today, -CARD_LOOKAHEAD_DAYS) : today
     const start = config.linkSince?.[pluggyAccountId] ?? config.syncFrom
     const dateFrom = [start, overlapStart].filter(Boolean).sort().pop() ?? today
-    const pluggyTransactions = await listTransactions(apiKey, pluggyAccountId, dateFrom, dateTo)
-    const entries = pluggyTransactions
-      .map((tx) => toBankEntry(tx, targetKind))
-      .filter((entry): entry is BankEntry => entry !== null)
-    const accountId = 'accountId' in link ? link.accountId : undefined
-    const windowDays = accountId !== undefined ? ACCOUNT_WINDOW_DAYS : CARD_WINDOW_DAYS
-    const scopedNow = () =>
-      ctx.transactions.filter((t) =>
-        'cardId' in link ? t.cardId === link.cardId : t.accountId === link.accountId,
-      )
+    const fetchFrom = targetKind === 'account' ? daysBefore(dateFrom, TRANSFER_WINDOW_DAYS) : dateFrom
+    const pluggyTransactions = await listTransactions(apiKey, pluggyAccountId, fetchFrom, dateTo)
 
-    // 1. Duplicata que já entrou antes (importado do banco + lançado no
-    //    app): une os dois, fica o do app.
-    const importedSides = scopedNow()
-      .filter((t) => t.id.startsWith('pluggy_'))
-      .map((t) => ({
-        key: t.id,
-        date: t.date,
-        type: t.type,
-        amount: t.amount,
-        description: t.description,
-        imported: t,
-      }))
-    const cleanup = pairBankWithManual(importedSides, scopedNow().filter(isManualCandidate), windowDays)
-    if (cleanup.pairs.length > 0) {
-      await mergeImportedDuplicates(
-        ctx.workspaceId,
-        cleanup.pairs,
-        accountId,
-        ctx.movementsById,
-        ctx.transactions,
-      )
+    const pairingEntries: BankEntry[] = []
+    const ownTransferKeys = new Set<string>()
+    for (const tx of pluggyTransactions) {
+      const entry = toBankEntry(tx, targetKind)
+      if (!entry) continue
+      pairingEntries.push(entry)
+      if (targetKind === 'account' && sameDocument(tx)) ownTransferKeys.add(entry.docId)
     }
+    fetched.push({
+      config,
+      pluggyAccountId,
+      link,
+      targetKind,
+      entries: pairingEntries.filter((e) => e.date >= dateFrom),
+      pairingEntries,
+      ownTransferKeys,
+      pluggyAccount: pluggyAccounts.get(pluggyAccountId),
+    })
+  }
+  return fetched
+}
 
-    // 2. Lançamentos novos do banco: o que já foi importado/conciliado cai
-    //    fora; o que corresponde a algo lançado no app só é vinculado.
-    const fresh = newBankEntries(
-      entries,
-      scopedNow().filter((t) => t.id.startsWith('pluggy_') || t.bankRef !== undefined),
-    ).map((entry) => ({ ...entry, key: entry.docId }))
-    const matched = pairBankWithManual(fresh, scopedNow().filter(isManualCandidate), windowDays)
-    if (matched.pairs.length > 0) await linkManualToBank(ctx.workspaceId, matched.pairs, accountId)
+// Só entra na busca de pares o que tem cara de transferência dos dois
+// lados — sem isso, um salário e um aluguel de mesmo valor no mesmo dia
+// em contas diferentes "virariam" transferência. Caixinha e pagamento de
+// fatura têm tratamento próprio e ficam de fora.
+const TRANSFER_HINT = /\b(pix|ted|doc|transf|transferencia|transferência|transferido|transferida)\b/i
 
-    // 3. Pagamento de fatura na conta sem "Pagar fatura" no app: paga a
-    //    fatura do cartão correspondente em vez de virar despesa solta.
-    const toImport: BankEntry[] = []
-    for (const entry of matched.unmatched) {
-      if (accountId !== undefined && entry.type === 'expense' && looksLikeBillPayment(entry.description)) {
-        const categoryId = ctx.suggest(entry.description, 'expense') ?? ctx.firstCategory.expense
-        const paid =
-          categoryId !== undefined &&
-          (await autoPayCardBill({
-            workspaceId: ctx.workspaceId,
-            bank: entry,
-            accountId,
-            cards: ctx.cards,
-            transactions: ctx.transactions,
-            categoryId,
-            createdBy: ctx.createdBy,
-          }))
-        if (paid) continue
-      }
-      toImport.push(entry)
-    }
+function isTransferCandidate(entry: { description: string; type: TransactionType }): boolean {
+  return (
+    TRANSFER_HINT.test(entry.description) &&
+    parseReserveMovement(entry) === null &&
+    !looksLikeBillPayment(entry.description)
+  )
+}
 
-    const reviewed: ReviewedEntry[] = []
-    for (const entry of toImport) {
-      const categoryId = ctx.suggest(entry.description, entry.type) ?? ctx.firstCategory[entry.type]
-      if (!categoryId) continue
-      reviewed.push({ ...entry, categoryId, tags: [BANK_SYNC_TAG] })
-    }
-
-    await importTransactions(ctx.workspaceId, reviewed, link, ctx.createdBy)
-    imported += reviewed.length
-    // 4. Saldo da conta = saldo do banco (aplicado no fim da sincronização).
-    const pluggyAccount = pluggyAccounts.get(pluggyAccountId)
-    if (
-      accountId !== undefined &&
-      pluggyAccount &&
-      pluggyAccount.type !== 'CREDIT' &&
-      typeof pluggyAccount.balance === 'number'
-    ) {
-      ctx.bankBalances.set(accountId, pluggyAccount.balance)
-    }
-
-    for (const entry of reviewed) {
-      ctx.transactions.push({
-        id: entry.docId ?? '',
-        type: entry.type,
-        amount: entry.amount,
-        date: entry.date,
-        description: entry.description,
-        categoryId: entry.categoryId,
-        paid: targetKind === 'account',
-        createdBy: ctx.createdBy,
-        ...link,
-      })
+// Fase 2: transferências entre contas da família (todas as conexões
+// juntas — a saída pode estar na conexão do marido e a entrada na da
+// esposa). Devolve as chaves que não devem virar lançamento e apaga as
+// transferências que já tinham sido importadas como receita/despesa.
+async function detectTransfers(ctx: SyncContext, fetched: FetchedLink[]): Promise<Set<string>> {
+  const sides: TransferSide[] = []
+  const skip = new Set<string>()
+  const seen = new Set<string>()
+  for (const f of fetched) {
+    if (!('accountId' in f.link)) continue
+    for (const key of f.ownTransferKeys) skip.add(key)
+    for (const entry of f.pairingEntries) {
+      if (seen.has(entry.docId)) continue
+      seen.add(entry.docId)
+      if (isTransferCandidate(entry))
+        sides.push({ key: entry.docId, appAccountId: f.link.accountId, ...entry })
     }
   }
+  // o que já foi importado também entra — a transferência pode ter virado
+  // receita/despesa antes desta regra existir
+  for (const t of ctx.transactions) {
+    if (!t.id.startsWith('pluggy_') || t.accountId === undefined || seen.has(t.id)) continue
+    if (!isTransferCandidate(t)) continue
+    sides.push({ key: t.id, appAccountId: t.accountId, date: t.date, type: t.type, amount: t.amount })
+  }
+  for (const key of findTransferPairs(sides)) skip.add(key)
 
+  const toDelete = [...skip].filter((key) => ctx.transactions.some((t) => t.id === key))
+  if (toDelete.length > 0) {
+    // saldo das contas é corrigido no fim (saldo do banco), então basta apagar
+    const batch = writeBatch(db)
+    for (const id of toDelete) batch.delete(transactionDoc(ctx.workspaceId, id))
+    await batch.commit()
+    ctx.transactions = ctx.transactions.filter((t) => !toDelete.includes(t.id))
+  }
+  return skip
+}
+
+// Fase 3: grava o que é de uma conta vinculada.
+async function processLink(ctx: SyncContext, f: FetchedLink, transferKeys: Set<string>): Promise<number> {
+  const { link, targetKind } = f
+  const entries = f.entries.filter((e) => !transferKeys.has(e.docId))
+  let imported = 0
+  const accountId = 'accountId' in link ? link.accountId : undefined
+  const windowDays = accountId !== undefined ? ACCOUNT_WINDOW_DAYS : CARD_WINDOW_DAYS
+  const scopedNow = () =>
+    ctx.transactions.filter((t) =>
+      'cardId' in link ? t.cardId === link.cardId : t.accountId === link.accountId,
+    )
+
+  // 1. Duplicata que já entrou antes (importado do banco + lançado no
+  //    app): une os dois, fica o do app.
+  const importedSides = scopedNow()
+    .filter((t) => t.id.startsWith('pluggy_'))
+    .map((t) => ({
+      key: t.id,
+      date: t.date,
+      type: t.type,
+      amount: t.amount,
+      description: t.description,
+      imported: t,
+    }))
+  const cleanup = pairBankWithManual(importedSides, scopedNow().filter(isManualCandidate), windowDays)
+  if (cleanup.pairs.length > 0) {
+    await mergeImportedDuplicates(
+      ctx.workspaceId,
+      cleanup.pairs,
+      accountId,
+      ctx.movementsById,
+      ctx.transactions,
+    )
+  }
+
+  // 2. Lançamentos novos do banco: o que já foi importado/conciliado cai
+  //    fora; o que corresponde a algo lançado no app só é vinculado.
+  const fresh = newBankEntries(
+    entries,
+    scopedNow().filter((t) => t.id.startsWith('pluggy_') || t.bankRef !== undefined),
+  ).map((entry) => ({ ...entry, key: entry.docId }))
+  const matched = pairBankWithManual(fresh, scopedNow().filter(isManualCandidate), windowDays)
+  if (matched.pairs.length > 0) await linkManualToBank(ctx.workspaceId, matched.pairs, accountId)
+
+  // 3. Pagamento de fatura na conta sem "Pagar fatura" no app: paga a
+  //    fatura do cartão correspondente em vez de virar despesa solta.
+  const toImport: BankEntry[] = []
+  for (const entry of matched.unmatched) {
+    if (accountId !== undefined && entry.type === 'expense' && looksLikeBillPayment(entry.description)) {
+      const categoryId = ctx.suggest(entry.description, 'expense') ?? ctx.firstCategory.expense
+      const paid =
+        categoryId !== undefined &&
+        (await autoPayCardBill({
+          workspaceId: ctx.workspaceId,
+          bank: entry,
+          accountId,
+          cards: ctx.cards,
+          transactions: ctx.transactions,
+          categoryId,
+          createdBy: ctx.createdBy,
+        }))
+      if (paid) continue
+    }
+    toImport.push(entry)
+  }
+
+  const reviewed: ReviewedEntry[] = []
+  for (const entry of toImport) {
+    const categoryId = ctx.suggest(entry.description, entry.type) ?? ctx.firstCategory[entry.type]
+    if (!categoryId) continue
+    reviewed.push({ ...entry, categoryId, tags: [BANK_SYNC_TAG] })
+  }
+
+  await importTransactions(ctx.workspaceId, reviewed, link, ctx.createdBy)
+  imported += reviewed.length
+  // 4. Saldo da conta = saldo do banco (aplicado no fim da sincronização).
+  const pluggyAccount = f.pluggyAccount
+  if (
+    accountId !== undefined &&
+    pluggyAccount &&
+    pluggyAccount.type !== 'CREDIT' &&
+    typeof pluggyAccount.balance === 'number'
+  ) {
+    ctx.bankBalances.set(accountId, pluggyAccount.balance)
+  }
+
+  for (const entry of reviewed) {
+    ctx.transactions.push({
+      id: entry.docId ?? '',
+      type: entry.type,
+      amount: entry.amount,
+      date: entry.date,
+      description: entry.description,
+      categoryId: entry.categoryId,
+      paid: targetKind === 'account',
+      createdBy: ctx.createdBy,
+      ...link,
+    })
+  }
   return imported
 }
 
@@ -354,19 +454,50 @@ async function runSync(
 
   let imported = 0
   const errors: string[] = []
+  const startedAt = new Date().toISOString()
+  const failed = new Map<string, string>() // ownerUid → erro
+
+  const fetched: FetchedLink[] = []
   for (const config of configs) {
-    const startedAt = new Date().toISOString()
     try {
-      imported += await syncConnection(ctx, config)
-      await recordPluggySync(workspaceId, config.ownerUid, { at: startedAt })
+      fetched.push(...(await fetchConnection(ctx, config)))
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Falha na sincronização bancária.'
-      errors.push(message)
-      await recordPluggySync(workspaceId, config.ownerUid, {
-        at: startedAt,
-        error: message,
-      }).catch(() => undefined)
+      failed.set(config.ownerUid, err instanceof Error ? err.message : 'Falha na sincronização bancária.')
     }
+  }
+
+  let transferKeys = new Set<string>()
+  try {
+    transferKeys = await detectTransfers(ctx, fetched)
+  } catch (err) {
+    errors.push(err instanceof Error ? err.message : 'Falha ao reconhecer transferências.')
+  }
+  // Alguma conexão falhou: o outro lado de uma transferência pode estar
+  // nela. Em vez de importar uma metade como receita/despesa, o que tem
+  // cara de transferência fica pra próxima sincronização.
+  if (failed.size > 0) {
+    for (const f of fetched) {
+      for (const entry of f.entries)
+        if (f.targetKind === 'account' && isTransferCandidate(entry)) transferKeys.add(entry.docId)
+    }
+  }
+
+  for (const f of fetched) {
+    if (failed.has(f.config.ownerUid)) continue
+    try {
+      imported += await processLink(ctx, f, transferKeys)
+    } catch (err) {
+      failed.set(f.config.ownerUid, err instanceof Error ? err.message : 'Falha na sincronização bancária.')
+    }
+  }
+
+  for (const config of configs) {
+    const error = failed.get(config.ownerUid)
+    if (error) errors.push(error)
+    await recordPluggySync(workspaceId, config.ownerUid, {
+      at: startedAt,
+      ...(error ? { error } : {}),
+    }).catch(() => undefined)
   }
 
   // Depois de importar: reservas do Mercado Pago ("Dinheiro reservado X")

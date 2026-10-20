@@ -62,6 +62,12 @@ export interface PluggyTransaction {
   status?: 'PENDING' | 'POSTED' | string
   category?: string | null
   operationType?: string | null
+  // quem pagou e quem recebeu (Pix/TED) — mesmo CPF/CNPJ nos dois lados é
+  // transferência entre contas da mesma pessoa
+  paymentData?: {
+    payer?: { documentNumber?: { value?: string | null } | null } | null
+    receiver?: { documentNumber?: { value?: string | null } | null } | null
+  } | null
   creditCardMetadata?: {
     installmentNumber?: number
     totalInstallments?: number
