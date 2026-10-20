@@ -26,13 +26,17 @@ function normalizeName(name: string): string {
 //   "Camisetas Ran" pra "Camisetas Rafa"); ou uma palavra em comum;
 // - sem nome: a única caixinha da conta, se houver só uma; senão a
 //   "Reserva".
+// Marcada pela pessoa (regra em caixinhas/rules.ts): essa, se ainda existe.
 // `undefined` = não existe ainda, criar com `nameToCreate`.
 function findCaixinha(
   caixinhas: Caixinha[],
   accountId: string,
   name: string | undefined,
+  caixinhaId?: string,
 ): { caixinha?: Caixinha; nameToCreate: string } {
   const sameAccount = caixinhas.filter((c) => c.accountId === accountId)
+  const marked = caixinhaId !== undefined ? sameAccount.find((c) => c.id === caixinhaId) : undefined
+  if (marked) return { caixinha: marked, nameToCreate: marked.name }
   if (!name) {
     if (sameAccount.length === 1) return { caixinha: sameAccount[0], nameToCreate: DEFAULT_CAIXINHA_NAME }
     const fallback = sameAccount.find((c) => normalizeName(c.name) === normalizeName(DEFAULT_CAIXINHA_NAME))
@@ -108,7 +112,7 @@ export async function applyBankReserves(
       if (!appliedIds.has(movementId)) {
         appliedIds.add(movementId)
         const signed = item.movement.kind === 'guardar' ? item.amount : -item.amount
-        const found = findCaixinha(caixinhas, item.accountId, item.movement.name)
+        const found = findCaixinha(caixinhas, item.accountId, item.movement.name, item.movement.caixinhaId)
         const accountCaixinhaIds = new Set(
           caixinhas.filter((c) => c.accountId === item.accountId).map((c) => c.id),
         )

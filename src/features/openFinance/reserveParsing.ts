@@ -16,6 +16,9 @@ export interface ReserveMovement {
   // nome da caixinha quando a descrição traz; sem nome (ex.: "Aplicação
   // RDB"), quem chama escolhe a caixinha da conta
   name?: string
+  // caixinha já sabida — marcada pela pessoa numa movimentação igual
+  // (caixinhas/rules.ts); manda mais que o nome
+  caixinhaId?: string
 }
 
 // Verbos que por si só já dizem "caixinha" (com ou sem "Dinheiro" antes).

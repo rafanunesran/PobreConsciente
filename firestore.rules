@@ -64,6 +64,19 @@ service cloud.firestore {
         && hasValidCreatedBy();
     }
 
+    // "Esta movimentação é a caixinha X" (caixinhas/rules.ts): id derivado
+    // de conta + sentido + descrição, regravado quando a pessoa troca a caixinha.
+    match /users/{userId}/caixinhaRules/{ruleId} {
+      allow read, delete: if request.auth != null && isWorkspaceMember(userId);
+      allow create, update: if request.auth != null && isWorkspaceMember(userId)
+        && request.resource.data.accountId is string
+        && request.resource.data.pattern is string
+        && request.resource.data.pattern.size() > 0 && request.resource.data.pattern.size() <= 200
+        && request.resource.data.type in ['expense', 'income']
+        && request.resource.data.caixinhaId is string
+        && hasValidCreatedBy();
+    }
+
     match /users/{userId}/cards/{cardId} {
       allow read, delete: if request.auth != null && isWorkspaceMember(userId);
       allow create, update: if request.auth != null && isWorkspaceMember(userId)

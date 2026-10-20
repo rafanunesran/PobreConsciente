@@ -31,6 +31,8 @@ import {
 import { SeriesScopeDialog } from './SeriesScopeDialog'
 import { TagInput } from './TagInput'
 import { AttachmentsSection } from '../attachments/AttachmentsSection'
+import { MarkCaixinhaDialog } from '../caixinhas/MarkCaixinhaDialog'
+import { canMarkAsCaixinha, similarTransactions } from '../caixinhas/markTransaction'
 import { addAttachment, deleteAttachmentsOf, type NewAttachment } from '../attachments/api'
 import { collectTags } from './tags'
 import { useTransactions } from './useTransactions'
@@ -65,6 +67,7 @@ export function TransactionFormPage() {
   const [loadError, setLoadError] = useState(false)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
+  const [markingCaixinha, setMarkingCaixinha] = useState(false)
   // Lançamento carregado (não só o form): é dele que saem `recurringRuleId`/
   // `installmentGroupId`, que dizem se esta edição precisa perguntar o
   // alcance. `series` é a série completa, usada só pra mostrar quantos
@@ -919,6 +922,21 @@ export function TransactionFormPage() {
         </form>
       )}
 
+      {isEditMode && loadedTransaction && canMarkAsCaixinha(loadedTransaction) ? (
+        // Dinheiro que foi pra (ou voltou de) uma caixinha e o app não
+        // reconheceu (ex.: "Aplicação" do banco): marca aqui uma vez.
+        <div className="flex flex-col gap-2 border-t border-border-light pt-4 dark:border-border-dark">
+          <p className="text-sm text-light-secondary dark:text-dark-secondary">
+            {loadedTransaction.type === 'expense'
+              ? 'Esse dinheiro foi guardado numa caixinha?'
+              : 'Esse dinheiro foi resgatado de uma caixinha?'}
+          </p>
+          <Button type="button" variant="secondary" onClick={() => setMarkingCaixinha(true)}>
+            É de uma caixinha
+          </Button>
+        </div>
+      ) : null}
+
       {isEditMode ? (
         <div className="border-t border-border-light pt-4 dark:border-border-dark">
           {seriesKind !== null ? (
@@ -965,6 +983,26 @@ export function TransactionFormPage() {
             </Button>
           )}
         </div>
+      ) : null}
+
+      {markingCaixinha && workspaceId && user && loadedTransaction && canMarkAsCaixinha(loadedTransaction) ? (
+        <MarkCaixinhaDialog
+          workspaceId={workspaceId}
+          uid={user.uid}
+          transaction={loadedTransaction}
+          similarCount={similarTransactions(loadedTransaction, allTransactions).length}
+          onClose={() => setMarkingCaixinha(false)}
+          onDone={(converted, caixinhaName) => {
+            showToast(
+              converted > 1
+                ? `${converted} movimentações movidas pra caixinha ${caixinhaName}`
+                : `Movido pra caixinha ${caixinhaName}`,
+            )
+            navigate('/registros', {
+              state: { month: loadedTransaction.date.slice(0, 7) } satisfies RegistrosLocationState,
+            })
+          }}
+        />
       ) : null}
 
       {scopePrompt && seriesKind !== null && loadedTransaction ? (
