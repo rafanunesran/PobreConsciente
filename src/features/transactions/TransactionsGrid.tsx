@@ -12,6 +12,7 @@ import type { CreditCard } from '../cards/types'
 import { useBulkPay, invoiceKey } from './useBulkPay'
 import { BulkPayBar } from './BulkPayBar'
 import { MoneyMovementRowCard } from './MoneyMovementRowCard'
+import { FilterStatCards, type FilterStat } from './FilterStatCards'
 import type { MoneyMovementRow } from '../categories/moneyMovements'
 
 interface TransactionsGridProps {
@@ -179,7 +180,7 @@ export function TransactionsGrid({
     .filter((m) => m.kind === 'reserve')
     .reduce((sum, m) => sum + (m.direction === 'out' ? m.amount : -m.amount), 0)
 
-  const stats: { value: TypeFilter; label: string; amount: number; tone: string }[] = [
+  const stats: FilterStat<TypeFilter>[] = [
     { value: 'income', label: 'Receitas', amount: totalIncomes, tone: 'text-brand-500' },
     { value: 'expense', label: 'Despesas', amount: totalExpenses, tone: 'text-danger' },
     {
@@ -198,33 +199,7 @@ export function TransactionsGrid({
       <BulkPayBar bulk={bulk} accounts={accounts} />
 
       {pendingOnly ? null : (
-        <div
-          className={cn('grid gap-2', stats.length === 4 ? 'grid-cols-2 sm:grid-cols-4' : 'grid-cols-3')}
-          role="tablist"
-          aria-label="Filtrar lançamentos"
-        >
-          {stats.map((stat) => (
-            <button
-              key={stat.value}
-              type="button"
-              role="tab"
-              aria-selected={filter === stat.value}
-              onClick={() => setFilter(stat.value)}
-              className={cn(
-                'min-w-0 rounded-xl border bg-surface-light px-3 py-2 text-left transition-colors duration-200 dark:bg-surface-dark-elevated',
-                filter === stat.value
-                  ? 'border-brand-500 ring-1 ring-brand-500'
-                  : 'border-border-light dark:border-transparent',
-              )}
-            >
-              <p className="text-[11px] text-light-secondary dark:text-dark-secondary">{stat.label}</p>
-              <p className={cn('tabular truncate text-sm font-bold', stat.tone)}>
-                {stat.amount < 0 ? '− ' : ''}
-                {formatBRL(Math.abs(stat.amount))}
-              </p>
-            </button>
-          ))}
-        </div>
+        <FilterStatCards stats={stats} selected={filter} onSelect={setFilter} />
       )}
 
       {pendingOnly ? null : (
