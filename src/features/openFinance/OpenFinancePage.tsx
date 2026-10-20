@@ -18,7 +18,8 @@ import { Input } from '../../components/ui/Input'
 import { cn, formatBRL } from '../../lib/utils'
 import { deletePluggyConfig, listPluggyConfigs, savePluggyConfig } from './api'
 import { authenticate, getItem, listAccounts } from './pluggyClient'
-import { BANK_SYNC_TAG, syncBankTransactions } from './sync'
+import { syncBankTransactions } from './sync'
+import { describeSyncResult } from './syncSummary'
 import type { PluggyAccount, PluggyAccountLink, PluggyConfig } from './types'
 
 interface FoundAccount extends PluggyAccount {
@@ -201,21 +202,9 @@ export function OpenFinancePage() {
     setSyncMessage(null)
     setSyncError(null)
     try {
-      const { imported, errors, accountsAligned = 0, caixinhasAligned = 0 } = await syncBankTransactions(
-        workspaceId,
-        user.uid,
-      )
-      const aligned = [
-        accountsAligned > 0 ? `${accountsAligned} conta(s)` : '',
-        caixinhasAligned > 0 ? `${caixinhasAligned} caixinha(s)` : '',
-      ].filter(Boolean)
-      setSyncMessage(
-        (imported === 0
-          ? 'Tudo em dia — nenhum lançamento novo.'
-          : `${imported} lançamento(s) importado(s) com a tag "${BANK_SYNC_TAG}".`) +
-          (aligned.length > 0 ? ` Saldo igual ao do banco: ${aligned.join(' e ')}.` : ''),
-      )
-      if (errors.length > 0) setSyncError(errors.join(' '))
+      const result = await syncBankTransactions(workspaceId, user.uid)
+      setSyncMessage(describeSyncResult(result))
+      if (result.errors.length > 0) setSyncError(result.errors.join(' '))
     } catch (err) {
       setSyncError(err instanceof Error ? err.message : 'Falha na sincronização.')
     } finally {

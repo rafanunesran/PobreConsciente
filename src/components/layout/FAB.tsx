@@ -1,8 +1,14 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowDownCircle, ArrowLeftRight, ArrowUpCircle, Calculator, Plus, X } from 'lucide-react'
+import { ArrowDownCircle, ArrowLeftRight, ArrowUpCircle, Calculator, Plus, RefreshCw, X } from 'lucide-react'
 import { FloatingCalculator } from './FloatingCalculator'
 import { useQuickAddStore } from '../../stores/quickAddStore'
+import { useAuthStore } from '../../stores/authStore'
+import { useWorkspaceStore } from '../../stores/workspaceStore'
+import { useToastStore } from '../../stores/toastStore'
+import { listPluggyConfigs } from '../../features/openFinance/api'
+import { syncBankTransactions } from '../../features/openFinance/sync'
+import { describeSyncResult } from '../../features/openFinance/syncSummary'
 import { cn } from '../../lib/utils'
 
 interface MenuItem {
@@ -20,6 +26,9 @@ export function FAB() {
   const open = useQuickAddStore((state) => state.open)
   const setOpen = useQuickAddStore((state) => state.setOpen)
   const [calcOpen, setCalcOpen] = useState(false)
+  const user = useAuthStore((state) => state.user)
+  const workspaceId = useWorkspaceStore((state) => state.workspaceId)
+  const showToast = useToastStore((state) => state.show)
 
   useEffect(() => {
     if (!open) return
@@ -29,6 +38,29 @@ export function FAB() {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [open, setOpen])
+
+  // Mesmo "Sincronizar agora" da tela de Conexão bancária, com o resultado
+  // num aviso. Sem conexão configurada, leva pra tela de configurar.
+  async function syncAccounts() {
+    if (!user || !workspaceId) return
+    try {
+      const configs = await listPluggyConfigs(workspaceId)
+      if (configs.length === 0) {
+        navigate('/conexao-bancaria')
+        return
+      }
+      showToast('Sincronizando contas...')
+      const result = await syncBankTransactions(workspaceId, user.uid)
+      if (result.errors.length > 0)
+        showToast(`Sincronização com erro: ${result.errors.join(' ')}`, { label: 'Ver', to: '/conexao-bancaria' })
+      else showToast(describeSyncResult(result))
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Falha na sincronização.', {
+        label: 'Ver',
+        to: '/conexao-bancaria',
+      })
+    }
+  }
 
   const items: MenuItem[] = [
     {
@@ -51,6 +83,13 @@ export function FAB() {
       icon: ArrowLeftRight,
       className: 'bg-violet-500/15 text-violet-500',
       action: () => navigate('/contas/transferir'),
+    },
+    {
+      title: 'Sincronizar contas',
+      description: 'Buscar agora os lançamentos e saldos do banco',
+      icon: RefreshCw,
+      className: 'bg-sky-500/15 text-sky-500',
+      action: () => void syncAccounts(),
     },
     {
       title: 'Calculadora',
