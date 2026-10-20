@@ -8,6 +8,8 @@ import { useAccounts } from '../accounts/useAccounts'
 import { useCards } from '../cards/useCards'
 import { useCategories } from '../categories/useCategories'
 import { TransactionsGrid } from './TransactionsGrid'
+import { CategorySpendingCard } from '../categories/CategorySpendingCard'
+import { moneyMovementTotals, useMoneyMovements } from '../categories/moneyMovements'
 import { MonthSelector } from '../../components/ui/MonthSelector'
 import { currentYearMonth } from './dateUtils'
 import { Button } from '../../components/ui/Button'
@@ -43,6 +45,11 @@ export function RegistrosPage() {
   const categoriesById = useMemo(
     () => new Map(categories.map((category) => [category.id, category])),
     [categories],
+  )
+  const moneyMovements = useMoneyMovements(workspaceId ?? '')
+  const movementTotals = useMemo(
+    () => moneyMovementTotals(moneyMovements, selectedMonth),
+    [moneyMovements, selectedMonth],
   )
   const tags = useMemo(() => collectTags(transactions), [transactions])
   const filtering = hasActiveFilters(filters)
@@ -143,15 +150,24 @@ export function RegistrosPage() {
               cardsById={cardsById}
             />
           ) : (
-            <TransactionsGrid
-              workspaceId={workspaceId}
-              transactions={transactions}
-              categoriesById={categoriesById}
-              accountsById={accountsById}
-              cardsById={cardsById}
-              selectedMonth={selectedMonth}
-              highlightKey={highlightKey}
-            />
+            <>
+              <CategorySpendingCard
+                transactions={transactions}
+                categories={categories}
+                cardsById={cardsById}
+                selectedMonth={selectedMonth}
+                extraTotals={movementTotals}
+              />
+              <TransactionsGrid
+                workspaceId={workspaceId}
+                transactions={transactions}
+                categoriesById={categoriesById}
+                accountsById={accountsById}
+                cardsById={cardsById}
+                selectedMonth={selectedMonth}
+                highlightKey={highlightKey}
+              />
+            </>
           )}
         </>
       )}

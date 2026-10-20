@@ -37,7 +37,7 @@ export function AccountTransferPage() {
   if (!user || !workspaceId) return null
 
   async function onSubmit(data: AccountTransferFormData) {
-    if (!workspaceId) return
+    if (!workspaceId || !user) return
     setFormError(null)
     const source = accounts.find((a) => a.id === data.fromAccountId)
     if (source && data.amount > source.balance) {
@@ -45,7 +45,7 @@ export function AccountTransferPage() {
       return
     }
     try {
-      await transferBetweenAccounts(workspaceId, data.fromAccountId, data.toAccountId, data.amount)
+      await transferBetweenAccounts(workspaceId, data.fromAccountId, data.toAccountId, data.amount, user.uid)
       navigate(fromParam ? `/contas/${fromParam}` : '/contas')
     } catch {
       setFormError('Não foi possível concluir a transferência. Tente novamente.')

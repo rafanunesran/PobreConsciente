@@ -64,6 +64,21 @@ service cloud.firestore {
         && hasValidCreatedBy();
     }
 
+    // Log de transferências entre contas (accounts/transferLog.ts) — só
+    // visualização ("Transferências" na divisão por categoria do extrato).
+    // Regravado pela sincronização bancária com o mesmo id do lançamento.
+    match /users/{userId}/accountTransfers/{transferId} {
+      allow read, delete: if request.auth != null && isWorkspaceMember(userId);
+      allow create, update: if request.auth != null && isWorkspaceMember(userId)
+        && request.resource.data.accountId is string
+        && request.resource.data.type in ['expense', 'income']
+        && request.resource.data.amount is number
+        && request.resource.data.date is string
+        && request.resource.data.description is string
+        && request.resource.data.description.size() <= 60
+        && hasValidCreatedBy();
+    }
+
     // "Esta movimentação é a caixinha X" (caixinhas/rules.ts): id derivado
     // de conta + sentido + descrição, regravado quando a pessoa troca a caixinha.
     match /users/{userId}/caixinhaRules/{ruleId} {
