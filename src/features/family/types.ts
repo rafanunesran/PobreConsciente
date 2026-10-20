@@ -15,4 +15,8 @@ export interface UserProfile {
   displayName: string
   email: string
   photoURL?: string
+  // nome completo como aparece no banco (ex.: "Rafael Nunes Figueiredo") —
+  // a conexão bancária usa pra reconhecer Pix/TED entre membros da família
+  // como transferência, não gasto (ver openFinance/sync.ts)
+  fullName?: string
 }

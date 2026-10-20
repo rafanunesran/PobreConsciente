@@ -43,6 +43,8 @@ export interface PluggyAccount {
   marketingName?: string | null
   number?: string
   balance?: number
+  owner?: string | null // nome do titular
+  taxNumber?: string | null // CPF/CNPJ do titular (pode vir mascarado)
   creditData?: {
     brand?: string | null
     creditLimit?: number | null
@@ -65,11 +67,22 @@ export interface PluggyTransaction {
   // quem pagou e quem recebeu (Pix/TED) — mesmo CPF/CNPJ nos dois lados é
   // transferência entre contas da mesma pessoa
   paymentData?: {
-    payer?: { documentNumber?: { value?: string | null } | null } | null
-    receiver?: { documentNumber?: { value?: string | null } | null } | null
+    payer?: { name?: string | null; documentNumber?: { value?: string | null } | null } | null
+    receiver?: { name?: string | null; documentNumber?: { value?: string | null } | null } | null
   } | null
   creditCardMetadata?: {
     installmentNumber?: number
     totalInstallments?: number
   } | null
+}
+
+// Investimento (caixinha, reserva, RDB/CDB...) — https://docs.pluggy.ai/en/docs/products/investments
+export interface PluggyInvestment {
+  id: string
+  itemId: string
+  name: string
+  type: string // FIXED_INCOME, MUTUAL_FUND, EQUITY...
+  subtype?: string | null
+  balance: number
+  status?: string | null // ACTIVE, PENDING, TOTAL_WITHDRAWAL
 }

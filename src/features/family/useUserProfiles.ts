@@ -7,6 +7,12 @@ import type { UserProfile } from './types'
 // evita refetch por componente.
 const cache = new Map<string, UserProfile>()
 
+// Depois de editar o próprio perfil (nome completo), pra tela mostrar o
+// valor novo sem esperar recarregar.
+export function primeUserProfile(profile: UserProfile): void {
+  cache.set(profile.uid, profile)
+}
+
 export function useUserProfiles(uids: string[]): Map<string, UserProfile> {
   const [, forceRender] = useState(0)
   const key = Array.from(new Set(uids.filter(Boolean))).sort().join(',')

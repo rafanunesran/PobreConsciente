@@ -14,15 +14,18 @@ const userProfileConverter: FirestoreDataConverter<UserProfile> = {
     displayName: profile.displayName,
     email: profile.email,
     ...(profile.photoURL !== undefined ? { photoURL: profile.photoURL } : {}),
+    ...(profile.fullName !== undefined ? { fullName: profile.fullName } : {}),
   }),
   fromFirestore: (snapshot: QueryDocumentSnapshot) => {
     const data = snapshot.data()
     const photoURL = typeof data.photoURL === 'string' ? data.photoURL : undefined
+    const fullName = typeof data.fullName === 'string' && data.fullName.trim() !== '' ? data.fullName : undefined
     return {
       uid: snapshot.id,
       displayName: typeof data.displayName === 'string' ? data.displayName : '',
       email: typeof data.email === 'string' ? data.email : '',
       ...(photoURL !== undefined ? { photoURL } : {}),
+      ...(fullName !== undefined ? { fullName } : {}),
     }
   },
 }
@@ -43,7 +46,18 @@ export async function upsertMyProfile(
   uid: string,
   data: { displayName: string; email: string; photoURL?: string },
 ): Promise<void> {
-  await setDoc(userProfileDoc(uid), { uid, ...data })
+  // merge: não apaga o nome completo (que só a tela de Família grava)
+  await setDoc(userProfileDoc(uid), { uid, ...data }, { merge: true })
+}
+
+const FULL_NAME_MAX = 80
+
+export async function setMyFullName(uid: string, fullName: string): Promise<void> {
+  await setDoc(
+    doc(db, 'userProfiles', uid),
+    { fullName: fullName.replace(/\s+/g, ' ').trim().slice(0, FULL_NAME_MAX) },
+    { merge: true },
+  )
 }
 
 export async function getUserProfile(uid: string): Promise<UserProfile | null> {

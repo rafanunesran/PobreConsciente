@@ -6,6 +6,9 @@ export interface Caixinha {
   yieldLabel?: string // só rótulo informativo, ex: "110% do CDI" — nunca calculado
   goalAmount?: number // meta de valor a juntar (> 0) — opcional
   goalDate?: string // 'YYYY-MM-DD' — prazo da meta, opcional mesmo com meta de valor
+  // id do investimento no banco (conexão bancária) de onde vem o saldo
+  // desta caixinha — ver openFinance/caixinhaSync.ts
+  bankRef?: string
   createdBy: string // uid de quem criou — nunca alterado em updates
 }
 

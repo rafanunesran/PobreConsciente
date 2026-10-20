@@ -7,7 +7,9 @@ import { accountDoc } from '../accounts/api'
 import { transactionDoc, transactionsCollection } from '../transactions/api'
 import type { Transaction } from '../transactions/types'
 import { ACCOUNT_WINDOW_DAYS, dayDistance, sharesWord } from './matching'
-import type { ReserveMovement } from './reserveParsing'
+import { CAIXINHA_NAME_MAX, type ReserveMovement } from './reserveParsing'
+import type { PluggyInvestment } from './types'
+import { todayDateString } from '../cards/invoiceUtils'
 
 // Mesmo limite de operações por writeBatch de imports/api.ts.
 const BATCH_LIMIT = 500
@@ -186,4 +188,105 @@ export async function removeLegacyCaixinhaTransactions(workspaceId: string): Pro
     for (const t of legacy.slice(start, start + BATCH_LIMIT)) batch.delete(transactionDoc(workspaceId, t.id))
     await batch.commit()
   }
+}
+
+// Palavras genéricas que o banco põe no nome do investimento e que não são
+// o nome da caixinha ("Caixinha Viagem" → "Viagem"; "RDB" → nada).
+const INVESTMENT_NAME_NOISE = new Set([
+  'caixinha',
+  'caixinhas',
+  'reserva',
+  'cofrinho',
+  'porquinho',
+  'objetivo',
+  'meta',
+  'rdb',
+  'cdb',
+  'lci',
+  'lca',
+  'liquidez',
+  'diaria',
+])
+
+function investmentCaixinhaName(investment: PluggyInvestment): string {
+  const words = investment.name
+    .replace(/\s+/g, ' ')
+    .trim()
+    .split(' ')
+    .filter((w) => !INVESTMENT_NAME_NOISE.has(normalizeName(w).replace(/[^a-z0-9]/g, '')))
+  return words.join(' ').trim().slice(0, CAIXINHA_NAME_MAX)
+}
+
+export interface InvestmentItem {
+  investment: PluggyInvestment
+  accountId: string // conta do app do mesmo banco
+}
+
+// O saldo de cada caixinha passa a ser o do investimento correspondente no
+// banco (caixinha/reserva aparece no Open Finance como renda fixa). A
+// caixinha fica vinculada ao investimento (bankRef); sem vínculo ainda,
+// procura pelo nome e, se for renda fixa, cria. Diferença entre o saldo do
+// app e o do banco (rendimento, movimento que o app não viu) fica no
+// histórico como "Ajuste de saldo".
+export async function alignCaixinhasWithInvestments(
+  workspaceId: string,
+  items: InvestmentItem[],
+  createdBy: string,
+): Promise<number> {
+  if (items.length === 0) return 0
+  const caixinhas = (await getDocs(caixinhasCollection(workspaceId))).docs.map((d) => d.data())
+  const today = todayDateString()
+  const batch = writeBatch(db)
+  let aligned = 0
+
+  for (const { investment, accountId } of items) {
+    if (investment.status === 'TOTAL_WITHDRAWAL') continue
+    const name = investmentCaixinhaName(investment)
+    let caixinha =
+      caixinhas.find((c) => c.bankRef === investment.id) ??
+      (name
+        ? findCaixinha(
+            caixinhas.filter((c) => c.bankRef === undefined),
+            accountId,
+            name,
+          ).caixinha
+        : undefined)
+    if (!caixinha) {
+      // só renda fixa vira caixinha nova (ação, fundo... não são reserva)
+      if (investment.type !== 'FIXED_INCOME' || investment.balance <= 0) continue
+      const ref = doc(caixinhasCollection(workspaceId))
+      caixinha = {
+        id: ref.id,
+        accountId,
+        name: name || investment.name.slice(0, CAIXINHA_NAME_MAX) || DEFAULT_CAIXINHA_NAME,
+        balance: 0,
+        createdBy,
+      }
+      batch.set(ref, caixinha)
+      caixinhas.push(caixinha)
+    }
+
+    const bankBalance = Math.round(investment.balance * 100) / 100
+    const diff = Math.round((bankBalance - caixinha.balance) * 100) / 100
+    batch.update(doc(caixinhasCollection(workspaceId), caixinha.id), {
+      balance: bankBalance,
+      bankRef: investment.id,
+    })
+    if (Math.abs(diff) >= 0.01) {
+      const movementRef = doc(caixinhaMovementsCollection(workspaceId))
+      batch.set(movementRef, {
+        id: movementRef.id,
+        caixinhaId: caixinha.id,
+        type: 'ajuste',
+        amount: diff,
+        date: today,
+        createdBy,
+      })
+    }
+    caixinha.balance = bankBalance
+    caixinha.bankRef = investment.id
+    aligned++
+  }
+  await batch.commit()
+  return aligned
 }

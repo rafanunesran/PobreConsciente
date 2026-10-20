@@ -27,6 +27,7 @@ const caixinhaConverter: FirestoreDataConverter<Caixinha> = {
     ...(caixinha.yieldLabel !== undefined ? { yieldLabel: caixinha.yieldLabel } : {}),
     ...(caixinha.goalAmount !== undefined ? { goalAmount: caixinha.goalAmount } : {}),
     ...(caixinha.goalDate !== undefined ? { goalDate: caixinha.goalDate } : {}),
+    ...(caixinha.bankRef !== undefined ? { bankRef: caixinha.bankRef } : {}),
   }),
   fromFirestore: (snapshot: QueryDocumentSnapshot) => {
     const data = snapshot.data()
@@ -42,6 +43,7 @@ const caixinhaConverter: FirestoreDataConverter<Caixinha> = {
       ...(yieldLabel !== undefined ? { yieldLabel } : {}),
       ...(goalAmount !== undefined ? { goalAmount } : {}),
       ...(goalDate !== undefined ? { goalDate } : {}),
+      ...(typeof data.bankRef === 'string' && data.bankRef !== '' ? { bankRef: data.bankRef } : {}),
     }
   },
 }

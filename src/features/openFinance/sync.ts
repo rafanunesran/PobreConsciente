@@ -1,4 +1,5 @@
-import { getDocs, writeBatch } from 'firebase/firestore'
+import { doc, getDoc, getDocs, writeBatch } from 'firebase/firestore'
+import { getUserProfile } from '../family/userProfiles'
 import { db } from '../../lib/firebase'
 import { accountDoc, accountsCollection } from '../accounts/api'
 import { caixinhaMovementsCollection } from '../caixinhas/movements'
@@ -15,18 +16,24 @@ import { formatDate, parseDate, roundToCents } from '../transactions/dateUtils'
 import type { Transaction, TransactionType } from '../transactions/types'
 import { listPluggyConfigs, recordPluggySync } from './api'
 import {
+  alignCaixinhasWithInvestments,
   applyBankReserves,
+  type InvestmentItem,
   isLegacyCaixinhaTransaction,
   removeLegacyCaixinhaTransactions,
   type ReserveItem,
 } from './caixinhaSync'
 import { parseReserveMovement } from './reserveParsing'
-import { authenticate, listAccounts, listTransactions } from './pluggyClient'
+import { authenticate, listAccounts, listInvestments, listTransactions } from './pluggyClient'
 import {
   ACCOUNT_WINDOW_DAYS,
   CARD_WINDOW_DAYS,
+  buildFamilyIdentity,
+  type FamilyIdentity,
   findTransferPairs,
+  isFamilyCounterpart,
   isManualCandidate,
+  TRANSFER_DESCRIPTION,
   looksLikeBillPayment,
   pairBankWithManual,
   TRANSFER_WINDOW_DAYS,
@@ -172,6 +179,8 @@ function linkTargetExists(link: PluggyAccountLink, accountIds: Set<string>, card
 
 export interface SyncResult {
   imported: number
+  accountsAligned?: number // contas com saldo igualado ao do banco
+  caixinhasAligned?: number // caixinhas com saldo igualado ao do investimento
   // uma mensagem por conexão que falhou — as outras seguem normalmente
   errors: string[]
 }
@@ -206,7 +215,18 @@ interface FetchedLink {
   pairingEntries: BankEntry[]
   // id do documento → quem pagou e quem recebeu têm o mesmo CPF/CNPJ
   ownTransferKeys: Set<string>
+  // id do documento → a outra ponta do Pix/TED (quem recebeu, numa saída;
+  // quem pagou, numa entrada), quando o banco informa
+  counterparts: Map<string, { name?: string | null; document?: string | null }>
   pluggyAccount?: PluggyAccount
+}
+
+interface FetchedConnection {
+  links: FetchedLink[]
+  investments: InvestmentItem[]
+  // titulares das contas conectadas — também são "da família"
+  ownerNames: string[]
+  ownerDocuments: string[]
 }
 
 function sameDocument(tx: PluggyTransaction): boolean {
@@ -216,9 +236,10 @@ function sameDocument(tx: PluggyTransaction): boolean {
 }
 
 // Fase 1: lê da Pluggy tudo de uma conexão (sem gravar nada).
-async function fetchConnection(ctx: SyncContext, config: PluggyConfig): Promise<FetchedLink[]> {
+async function fetchConnection(ctx: SyncContext, config: PluggyConfig): Promise<FetchedConnection> {
   const linkEntries = Object.entries(config.links)
-  if (linkEntries.length === 0) return []
+  const empty: FetchedConnection = { links: [], investments: [], ownerNames: [], ownerDocuments: [] }
+  if (linkEntries.length === 0) return empty
 
   const today = todayDateString()
   const overlapStart = config.lastSyncAt ? daysBefore(config.lastSyncAt.slice(0, 10), OVERLAP_DAYS) : ''
@@ -229,6 +250,28 @@ async function fetchConnection(ctx: SyncContext, config: PluggyConfig): Promise<
   const pluggyAccounts = new Map<string, PluggyAccount>()
   for (const itemId of config.itemIds) {
     for (const account of await listAccounts(apiKey, itemId)) pluggyAccounts.set(account.id, account)
+  }
+  const ownerNames = [...pluggyAccounts.values()].flatMap((a) => (a.owner ? [a.owner] : []))
+  const ownerDocuments = [...pluggyAccounts.values()].flatMap((a) => (a.taxNumber ? [a.taxNumber] : []))
+
+  // Investimentos (caixinhas/reservas) de cada banco, ligados à conta do
+  // app vinculada à conta corrente desse mesmo banco. Banco que não
+  // informa investimentos só fica sem — não derruba a sincronização.
+  const investments: InvestmentItem[] = []
+  for (const itemId of config.itemIds) {
+    const appAccountId = linkEntries.flatMap(([pid, link]) =>
+      'accountId' in link && pluggyAccounts.get(pid)?.itemId === itemId && ctx.accountIds.has(link.accountId)
+        ? [link.accountId]
+        : [],
+    )[0]
+    if (!appAccountId) continue
+    try {
+      for (const investment of await listInvestments(apiKey, itemId)) {
+        investments.push({ investment, accountId: appAccountId })
+      }
+    } catch {
+      // sem investimentos nesse banco
+    }
   }
 
   const fetched: FetchedLink[] = []
@@ -248,11 +291,15 @@ async function fetchConnection(ctx: SyncContext, config: PluggyConfig): Promise<
 
     const pairingEntries: BankEntry[] = []
     const ownTransferKeys = new Set<string>()
+    const counterparts: FetchedLink['counterparts'] = new Map()
     for (const tx of pluggyTransactions) {
       const entry = toBankEntry(tx, targetKind)
       if (!entry) continue
       pairingEntries.push(entry)
-      if (targetKind === 'account' && sameDocument(tx)) ownTransferKeys.add(entry.docId)
+      if (targetKind !== 'account') continue
+      if (sameDocument(tx)) ownTransferKeys.add(entry.docId)
+      const other = entry.type === 'expense' ? tx.paymentData?.receiver : tx.paymentData?.payer
+      if (other) counterparts.set(entry.docId, { name: other.name, document: other.documentNumber?.value })
     }
     fetched.push({
       config,
@@ -262,21 +309,21 @@ async function fetchConnection(ctx: SyncContext, config: PluggyConfig): Promise<
       entries: pairingEntries.filter((e) => e.date >= dateFrom),
       pairingEntries,
       ownTransferKeys,
+      counterparts,
       pluggyAccount: pluggyAccounts.get(pluggyAccountId),
     })
   }
-  return fetched
+  return { links: fetched, investments, ownerNames, ownerDocuments }
 }
 
 // Só entra na busca de pares o que tem cara de transferência dos dois
 // lados — sem isso, um salário e um aluguel de mesmo valor no mesmo dia
 // em contas diferentes "virariam" transferência. Caixinha e pagamento de
 // fatura têm tratamento próprio e ficam de fora.
-const TRANSFER_HINT = /\b(pix|ted|doc|transf|transferencia|transferência|transferido|transferida)\b/i
 
 function isTransferCandidate(entry: { description: string; type: TransactionType }): boolean {
   return (
-    TRANSFER_HINT.test(entry.description) &&
+    TRANSFER_DESCRIPTION.test(entry.description) &&
     parseReserveMovement(entry) === null &&
     !looksLikeBillPayment(entry.description)
   )
@@ -286,7 +333,11 @@ function isTransferCandidate(entry: { description: string; type: TransactionType
 // juntas — a saída pode estar na conexão do marido e a entrada na da
 // esposa). Devolve as chaves que não devem virar lançamento e apaga as
 // transferências que já tinham sido importadas como receita/despesa.
-async function detectTransfers(ctx: SyncContext, fetched: FetchedLink[]): Promise<Set<string>> {
+async function detectTransfers(
+  ctx: SyncContext,
+  fetched: FetchedLink[],
+  family: FamilyIdentity,
+): Promise<Set<string>> {
   const sides: TransferSide[] = []
   const skip = new Set<string>()
   const seen = new Set<string>()
@@ -296,6 +347,15 @@ async function detectTransfers(ctx: SyncContext, fetched: FetchedLink[]): Promis
     for (const entry of f.pairingEntries) {
       if (seen.has(entry.docId)) continue
       seen.add(entry.docId)
+      // Pix/TED pra (ou de) alguém da família — mesmo sem a conta do outro
+      // conectada, o dinheiro não saiu da casa (ver FamilyIdentity)
+      if (
+        parseReserveMovement(entry) === null &&
+        isFamilyCounterpart(f.counterparts.get(entry.docId), entry.description, family)
+      ) {
+        skip.add(entry.docId)
+        continue
+      }
       if (isTransferCandidate(entry))
         sides.push({ key: entry.docId, appAccountId: f.link.accountId, ...entry })
     }
@@ -304,6 +364,10 @@ async function detectTransfers(ctx: SyncContext, fetched: FetchedLink[]): Promis
   // receita/despesa antes desta regra existir
   for (const t of ctx.transactions) {
     if (!t.id.startsWith('pluggy_') || t.accountId === undefined || seen.has(t.id)) continue
+    if (parseReserveMovement(t) === null && isFamilyCounterpart(undefined, t.description, family)) {
+      skip.add(t.id)
+      continue
+    }
     if (!isTransferCandidate(t)) continue
     sides.push({ key: t.id, appAccountId: t.accountId, date: t.date, type: t.type, amount: t.amount })
   }
@@ -422,6 +486,18 @@ async function processLink(ctx: SyncContext, f: FetchedLink, transferKeys: Set<s
   return imported
 }
 
+// Nome completo (e o nome de exibição, se tiver nome e sobrenome) de cada
+// pessoa do workspace — o perfil da Família (ver family/userProfiles.ts).
+async function loadFamilyNames(workspaceId: string, createdBy: string): Promise<string[]> {
+  const familySnap = await getDoc(doc(db, 'families', workspaceId))
+  const memberIds: string[] =
+    familySnap.exists() && Array.isArray(familySnap.data().memberIds)
+      ? familySnap.data().memberIds.filter((id: unknown): id is string => typeof id === 'string')
+      : [createdBy]
+  const profiles = await Promise.all(memberIds.map((uid) => getUserProfile(uid).catch(() => null)))
+  return profiles.flatMap((p) => [p?.fullName, p?.displayName].filter((n): n is string => Boolean(n)))
+}
+
 async function runSync(
   workspaceId: string,
   createdBy: string,
@@ -470,17 +546,25 @@ async function runSync(
   const failed = new Map<string, string>() // ownerUid → erro
 
   const fetched: FetchedLink[] = []
+  const investments: InvestmentItem[] = []
+  const familyNames = await loadFamilyNames(workspaceId, createdBy).catch(() => [] as string[])
+  const familyDocuments: string[] = []
   for (const config of configs) {
     try {
-      fetched.push(...(await fetchConnection(ctx, config)))
+      const connection = await fetchConnection(ctx, config)
+      fetched.push(...connection.links)
+      investments.push(...connection.investments)
+      familyNames.push(...connection.ownerNames)
+      familyDocuments.push(...connection.ownerDocuments)
     } catch (err) {
       failed.set(config.ownerUid, err instanceof Error ? err.message : 'Falha na sincronização bancária.')
     }
   }
+  const family = buildFamilyIdentity(familyNames, familyDocuments)
 
   let transferKeys = new Set<string>()
   try {
-    transferKeys = await detectTransfers(ctx, fetched)
+    transferKeys = await detectTransfers(ctx, fetched, family)
   } catch (err) {
     errors.push(err instanceof Error ? err.message : 'Falha ao reconhecer transferências.')
   }
@@ -539,6 +623,15 @@ async function runSync(
     errors.push(err instanceof Error ? err.message : 'Falha ao atualizar as caixinhas.')
   }
 
+  // Saldo de cada caixinha = saldo do investimento no banco (depois dos
+  // movimentos acima, pra diferença virar só o rendimento/ajuste).
+  let caixinhasAligned = 0
+  try {
+    caixinhasAligned = await alignCaixinhasWithInvestments(workspaceId, investments, createdBy)
+  } catch (err) {
+    errors.push(err instanceof Error ? err.message : 'Falha ao atualizar o saldo das caixinhas.')
+  }
+
   for (const f of fetched) {
     if (failed.has(f.config.ownerUid)) continue
     try {
@@ -577,7 +670,7 @@ async function runSync(
       errors.push(err instanceof Error ? err.message : 'Falha ao atualizar o saldo das contas.')
     }
   }
-  return { imported, errors }
+  return { imported, errors, accountsAligned: ctx.bankBalances.size, caixinhasAligned }
 }
 
 // Uma sincronização por vez nesta aba — o StrictMode e cliques repetidos

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ArrowLeft, Check, Copy, LogOut, Users } from 'lucide-react'
 import { useAuthStore } from '../../stores/authStore'
@@ -8,7 +8,8 @@ import { Button } from '../../components/ui/Button'
 import { Input } from '../../components/ui/Input'
 import { Card } from '../../components/ui/Card'
 import { createFamily, joinFamily, leaveFamily } from './api'
-import { useUserProfiles } from './useUserProfiles'
+import { primeUserProfile, useUserProfiles } from './useUserProfiles'
+import { getUserProfile, setMyFullName } from './userProfiles'
 
 const ABOUT_TEXT =
   'No modo família, duas ou mais pessoas administram juntas as mesmas contas, cartões e categorias. Se você entrar numa família, seus próprios dados não somem — eles só ficam fora de vista enquanto você estiver na família, e voltam a aparecer se você sair.'
@@ -26,6 +27,9 @@ function MemberList({ memberIds, ownerId }: { memberIds: string[]; ownerId: stri
               <p className="truncate text-sm font-medium text-light-primary dark:text-dark-primary">
                 {profile?.displayName ?? 'Carregando...'}
               </p>
+              {profile?.fullName ? (
+                <p className="truncate text-xs text-light-secondary dark:text-dark-secondary">{profile.fullName}</p>
+              ) : null}
               {uid === ownerId ? (
                 <p className="text-xs text-light-secondary dark:text-dark-secondary">Dono</p>
               ) : null}
@@ -33,6 +37,70 @@ function MemberList({ memberIds, ownerId }: { memberIds: string[]; ownerId: stri
           </Card>
         )
       })}
+    </div>
+  )
+}
+
+// Nome completo como aparece no banco — com ele, Pix/TED entre membros da
+// família vira transferência (não gasto) na conexão bancária.
+function FullNameField({ uid }: { uid: string }) {
+  const [value, setValue] = useState('')
+  const [saved, setSaved] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [message, setMessage] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    getUserProfile(uid)
+      .then((profile) => {
+        if (cancelled) return
+        setValue(profile?.fullName ?? '')
+        setSaved(profile?.fullName ?? '')
+      })
+      .catch(() => undefined)
+    return () => {
+      cancelled = true
+    }
+  }, [uid])
+
+  async function handleSave() {
+    setSaving(true)
+    setMessage(null)
+    try {
+      await setMyFullName(uid, value)
+      const profile = await getUserProfile(uid)
+      if (profile) primeUserProfile(profile)
+      setSaved(profile?.fullName ?? '')
+      setMessage('Salvo.')
+    } catch {
+      setMessage('Não foi possível salvar. Tente novamente.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-2">
+      <Input
+        label="Seu nome completo (como aparece no banco)"
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        placeholder="Ex.: Rafael Nunes Figueiredo"
+        autoComplete="name"
+      />
+      <p className="text-xs text-light-secondary dark:text-dark-secondary">
+        Usado pela conexão bancária pra reconhecer Pix e transferências entre você e a sua família — eles não
+        contam como gasto nem receita do mês. Visível pra outras pessoas do app, como o seu nome.
+      </p>
+      {message ? <p className="text-xs text-light-secondary dark:text-dark-secondary">{message}</p> : null}
+      <Button
+        type="button"
+        variant="secondary"
+        onClick={handleSave}
+        disabled={saving || value.trim() === saved.trim()}
+      >
+        {saving ? 'Salvando...' : 'Salvar nome completo'}
+      </Button>
     </div>
   )
 }
@@ -111,6 +179,8 @@ export function FamilyPage() {
         </button>
         <h1 className="text-xl font-semibold text-light-primary dark:text-dark-primary">Família</h1>
       </div>
+
+      <FullNameField uid={user.uid} />
 
       {workspaceLoading ? (
         <div className="h-40 animate-pulse rounded-2xl border border-border-light bg-surface-light dark:border-border-dark dark:bg-surface-dark-elevated" />

@@ -1,4 +1,4 @@
-import type { PluggyAccount, PluggyItem, PluggyTransaction } from './types'
+import type { PluggyAccount, PluggyInvestment, PluggyItem, PluggyTransaction } from './types'
 
 // A API da Pluggy libera CORS (Access-Control-Allow-Origin: *), então o
 // app chama direto do navegador com as credenciais da própria pessoa — não
@@ -107,6 +107,16 @@ export interface PluggyBill {
 export async function listBills(apiKey: string, accountId: string): Promise<PluggyBill[]> {
   const { results } = await request<{ results: PluggyBill[] }>(
     `/bills?accountId=${encodeURIComponent(accountId)}`,
+    { headers: { 'X-API-KEY': apiKey } },
+  )
+  return results
+}
+
+// Investimentos de um banco conectado — caixinhas/reservas aparecem aqui
+// como renda fixa (RDB/CDB), com o saldo atual de cada uma.
+export async function listInvestments(apiKey: string, itemId: string): Promise<PluggyInvestment[]> {
+  const { results } = await request<{ results: PluggyInvestment[] }>(
+    `/investments?itemId=${encodeURIComponent(itemId)}&pageSize=500`,
     { headers: { 'X-API-KEY': apiKey } },
   )
   return results

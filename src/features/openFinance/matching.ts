@@ -191,3 +191,82 @@ export function findTransferPairs(sides: TransferSide[]): Set<string> {
   }
   return paired
 }
+
+// Quem é "da família" pra reconhecer Pix/TED entre vocês: nomes completos
+// (perfil da Família + dono de cada conta conectada) e CPFs (dono de cada
+// conta conectada, como a Pluggy informa).
+export interface FamilyIdentity {
+  names: string[][] // cada nome já quebrado em palavras normalizadas
+  documents: string[] // só dígitos e '*' (CPF pode vir mascarado)
+}
+
+// Descrição de Pix/TED/DOC/transferência.
+export const TRANSFER_DESCRIPTION =
+  /\b(pix|ted|doc|transf|transferencia|transferência|transferido|transferida)\b/i
+
+const NAME_PARTICLES = new Set(['de', 'da', 'do', 'das', 'dos', 'e'])
+
+function nameTokens(text: string): string[] {
+  return text
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z]+/g, ' ')
+    .split(' ')
+    .filter((w) => w.length > 0 && !NAME_PARTICLES.has(w))
+}
+
+function normalizeDocument(value: string): string {
+  return value.replace(/[^0-9*]/g, '')
+}
+
+export function buildFamilyIdentity(names: string[], documents: string[]): FamilyIdentity {
+  return {
+    names: names.map(nameTokens).filter((tokens) => tokens.length >= 2),
+    documents: documents.map(normalizeDocument).filter((d) => d.replace(/\*/g, '').length >= 4),
+  }
+}
+
+// Mesmo CPF/CNPJ, aceitando máscara ("***.***.123-22"): compara posição a
+// posição onde os dois têm dígito; precisa de pelo menos 5 dígitos em comum.
+export function documentsMatch(a: string, b: string): boolean {
+  const da = normalizeDocument(a)
+  const db = normalizeDocument(b)
+  if (da.length !== db.length || da.length === 0) return false
+  let compared = 0
+  for (let i = 0; i < da.length; i++) {
+    if (da[i] === '*' || db[i] === '*') continue
+    if (da[i] !== db[i]) return false
+    compared++
+  }
+  return compared >= 5
+}
+
+// O texto cita alguém da família: primeiro E último nome aparecem como
+// palavras inteiras (o banco abrevia o meio: "Rafael N Figueiredo").
+export function mentionsFamilyMember(text: string, identity: FamilyIdentity): boolean {
+  const words = new Set(nameTokens(text))
+  return identity.names.some(
+    (tokens) => words.has(tokens[0] as string) && words.has(tokens[tokens.length - 1] as string),
+  )
+}
+
+export function isFamilyCounterpart(
+  counterpart: { name?: string | null; document?: string | null } | undefined,
+  description: string,
+  identity: FamilyIdentity,
+): boolean {
+  // Com a outra ponta informada pelo banco, só ela decide — a descrição
+  // de alguns bancos traz o nome do próprio titular em toda linha.
+  if (counterpart?.document || counterpart?.name) {
+    if (
+      counterpart.document &&
+      identity.documents.some((d) => documentsMatch(d, counterpart.document as string))
+    ) {
+      return true
+    }
+    return Boolean(counterpart.name && mentionsFamilyMember(counterpart.name, identity))
+  }
+  // Sem ela, o nome na descrição só vale se a linha for de transferência.
+  return TRANSFER_DESCRIPTION.test(description) && mentionsFamilyMember(description, identity)
+}
