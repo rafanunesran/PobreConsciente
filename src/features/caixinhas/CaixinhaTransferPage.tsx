@@ -6,8 +6,6 @@ import { useAuthStore } from '../../stores/authStore'
 import { useWorkspaceStore } from '../../stores/workspaceStore'
 import { useAccounts } from '../accounts/useAccounts'
 import { useCaixinhas } from './useCaixinhas'
-import { useCategories } from '../categories/useCategories'
-import { getOrCreateCategoryByName } from '../categories/api'
 import { depositToCaixinha, withdrawFromCaixinha } from './caixinhaTransfers'
 import { caixinhaTransferSchema, type CaixinhaTransferFormData } from './schemas'
 import { Button } from '../../components/ui/Button'
@@ -24,7 +22,6 @@ export function CaixinhaTransferPage() {
 
   const { accounts, loading: loadingAccounts } = useAccounts(workspaceId ?? '')
   const { caixinhas, loading: loadingCaixinhas } = useCaixinhas(workspaceId ?? '', accountId ?? '')
-  const { categories } = useCategories(workspaceId ?? '')
   const [formError, setFormError] = useState<string | null>(null)
 
   const account = accounts.find((a) => a.id === accountId)
@@ -57,19 +54,10 @@ export function CaixinhaTransferPage() {
       return
     }
     try {
-      const categoryId = await getOrCreateCategoryByName(
-        workspaceId,
-        categories,
-        'Caixinha',
-        direction === 'guardar' ? 'expense' : 'income',
-        'wallet',
-        '#8B5CF6',
-        user.uid,
-      )
       if (direction === 'guardar') {
-        await depositToCaixinha(workspaceId, account.id, caixinha.id, data.amount, user.uid, 'guardar', categoryId)
+        await depositToCaixinha(workspaceId, account.id, caixinha.id, data.amount, user.uid)
       } else {
-        await withdrawFromCaixinha(workspaceId, account.id, caixinha.id, data.amount, categoryId, user.uid)
+        await withdrawFromCaixinha(workspaceId, account.id, caixinha.id, data.amount, user.uid)
       }
       navigate(`/contas/${account.id}`)
     } catch {
@@ -107,8 +95,8 @@ export function CaixinhaTransferPage() {
         />
         <p className="-mt-2 text-sm text-light-secondary dark:text-dark-secondary">
           {direction === 'guardar'
-            ? 'Vira uma despesa no extrato da conta, categorizada como Caixinha.'
-            : 'Vira uma receita no extrato da conta, categorizada como Caixinha.'}
+            ? 'O dinheiro só muda de lugar: sai do saldo da conta e entra na caixinha. Não conta como despesa do mês.'
+            : 'O dinheiro só muda de lugar: sai da caixinha e volta pro saldo da conta. Não conta como receita do mês.'}
         </p>
 
         {formError ? <p className="text-sm text-danger">{formError}</p> : null}

@@ -11,6 +11,7 @@ import {
   type BankEntry,
 } from './sync'
 import { ACCOUNT_WINDOW_DAYS, CARD_WINDOW_DAYS, isManualCandidate, pairBankWithManual } from './matching'
+import { parseReserveMovement } from './reserveParsing'
 import type { PluggyAccountLink, PluggyConfig } from './types'
 
 // Quanto pra trás o diagnóstico olha — além da data inicial, pra mostrar
@@ -19,6 +20,7 @@ const DIAGNOSTIC_DAYS_BACK = 60
 
 export type DiagnosticVerdict =
   | 'imported' // está no app
+  | 'caixinha' // guardar/resgatar — vai direto pra caixinha, não vira lançamento
   | 'duplicate' // igual (data + tipo + valor) a algo já lançado no destino
   | 'beforeStart' // anterior a "importar a partir de"
   | 'billPayment' // pagamento de fatura do lado do cartão
@@ -90,6 +92,8 @@ export async function diagnoseLink(
     if (!entry) {
       row.verdict =
         targetKind === 'card' && isCardBillPayment(tx) ? 'billPayment' : tx.amount === 0 ? 'zero' : 'pending'
+    } else if (targetKind === 'account' && parseReserveMovement(entry)) {
+      row.verdict = 'caixinha'
     } else if (existingIds.has(entry.docId)) {
       row.verdict = 'imported'
     } else if (start && entry.date < start) {

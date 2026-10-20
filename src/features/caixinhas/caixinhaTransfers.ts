@@ -1,19 +1,22 @@
 import { doc, runTransaction } from 'firebase/firestore'
 import { db } from '../../lib/firebase'
 import { accountDoc } from '../accounts/api'
-import { createTransaction, transactionsCollection } from '../transactions/api'
+import { createTransaction } from '../transactions/api'
 import { todayDateString } from '../cards/invoiceUtils'
 import { caixinhaDoc } from './api'
 import { caixinhaMovementsCollection } from './movements'
 import type { CaixinhaMovementType } from './types'
 
-// Guardar: tira da conta, põe na caixinha — mexe de verdade no saldo da
-// conta, então também nasce uma despesa vinculada no extrato (exceto
-// quando reaproveitado por registerCaixinhaYield: nesse caso a receita do
-// rendimento já foi criada, e criar aqui também duplicaria o valor —
-// `categoryId` vem omitido justamente pra pular essa parte).
-// `movementType` default 'guardar', mas registerCaixinhaYield reaproveita
-// esta mesma transferência com 'rendimento' pra rotular certo no extrato.
+// Guardar e resgatar são reserva, não gasto nem receita: o dinheiro só
+// muda de lugar (conta ↔ caixinha), como uma transferência entre contas
+// (accounts/accountTransfers.ts) — por isso não criam Transaction e não
+// entram nos totais do mês. Ficam registrados só no histórico da caixinha
+// (caixinhaMovements). A conexão bancária segue a mesma regra
+// (openFinance/caixinhaSync.ts).
+//
+// Guardar: tira da conta, põe na caixinha. `movementType` default
+// 'guardar', mas registerCaixinhaYield reaproveita esta mesma
+// transferência com 'rendimento' pra rotular certo no histórico.
 export async function depositToCaixinha(
   uid: string,
   accountId: string,
@@ -21,10 +24,8 @@ export async function depositToCaixinha(
   amount: number,
   createdBy: string,
   movementType: CaixinhaMovementType = 'guardar',
-  categoryId?: string,
 ): Promise<void> {
   const movementRef = doc(caixinhaMovementsCollection(uid))
-  const txRef = categoryId !== undefined ? doc(transactionsCollection(uid)) : null
   await runTransaction(db, async (transaction) => {
     const accountSnap = await transaction.get(accountDoc(uid, accountId))
     const caixinhaSnap = await transaction.get(caixinhaDoc(uid, caixinhaId))
@@ -40,35 +41,19 @@ export async function depositToCaixinha(
       date: todayDateString(),
       createdBy,
     })
-    if (txRef !== null && categoryId !== undefined) {
-      transaction.set(txRef, {
-        id: txRef.id,
-        type: 'expense',
-        amount,
-        date: todayDateString(),
-        description: `Guardado — ${caixinhaSnap.data().name}`,
-        categoryId,
-        paid: true,
-        accountId,
-        createdBy,
-      })
-    }
   })
 }
 
-// Resgatar: tira da caixinha, devolve pra conta — sempre nasce uma receita
-// vinculada no extrato (é dinheiro voltando pra conta de verdade). Mesma
-// lógica de saldo, valida saldo suficiente na caixinha antes de escrever.
+// Resgatar: tira da caixinha, devolve pra conta. Mesma lógica de saldo,
+// valida saldo suficiente na caixinha antes de escrever.
 export async function withdrawFromCaixinha(
   uid: string,
   accountId: string,
   caixinhaId: string,
   amount: number,
-  categoryId: string,
   createdBy: string,
 ): Promise<void> {
   const movementRef = doc(caixinhaMovementsCollection(uid))
-  const txRef = doc(transactionsCollection(uid))
   await runTransaction(db, async (transaction) => {
     const accountSnap = await transaction.get(accountDoc(uid, accountId))
     const caixinhaSnap = await transaction.get(caixinhaDoc(uid, caixinhaId))
@@ -83,17 +68,6 @@ export async function withdrawFromCaixinha(
       type: 'resgatar',
       amount: -amount,
       date: todayDateString(),
-      createdBy,
-    })
-    transaction.set(txRef, {
-      id: txRef.id,
-      type: 'income',
-      amount,
-      date: todayDateString(),
-      description: `Resgatado — ${caixinhaSnap.data().name}`,
-      categoryId,
-      paid: true,
-      accountId,
       createdBy,
     })
   })

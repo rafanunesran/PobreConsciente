@@ -12,6 +12,7 @@ import { upsertMyProfile } from '../../features/family/userProfiles'
 import { topUpRecurringRules } from '../../features/transactions/recurring'
 import { notifyUpcomingBills } from '../../features/reminders/billNotifications'
 import { autoSyncBankTransactions } from '../../features/openFinance/sync'
+import { removeLegacyCaixinhaTransactions } from '../../features/openFinance/caixinhaSync'
 
 // NOTE: abaixo de `lg`, comportamento igual ao original (coluna única de
 // 480px, bottom nav). Em `lg+`, a Sidebar substitui a bottom nav e a coluna
@@ -52,6 +53,12 @@ export function AppShell() {
   // uma vez por dia, silencioso se falhar.
   useEffect(() => {
     if (workspaceId && !workspaceLoading) notifyUpcomingBills(workspaceId).catch(() => undefined)
+  }, [workspaceId, workspaceLoading])
+
+  // Guardar/resgatar de caixinha deixou de virar despesa/receita — tira do
+  // extrato os lançamentos antigos desse tipo. Silencioso, idempotente.
+  useEffect(() => {
+    if (workspaceId && !workspaceLoading) removeLegacyCaixinhaTransactions(workspaceId).catch(() => undefined)
   }, [workspaceId, workspaceLoading])
 
   // Importa os lançamentos novos do banco (se a conexão bancária estiver

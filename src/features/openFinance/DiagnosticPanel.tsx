@@ -11,6 +11,7 @@ import { diagnoseLink, type DiagnosticResult, type DiagnosticVerdict } from './d
 import type { PluggyAccount, PluggyAccountLink, PluggyConfig } from './types'
 
 const VERDICT_LABELS: Record<DiagnosticVerdict, string> = {
+  caixinha: 'Caixinha (não é gasto)',
   imported: 'No app',
   duplicate: 'Conciliado com um lançamento do app',
   beforeStart: 'Antes da data inicial',
@@ -21,6 +22,7 @@ const VERDICT_LABELS: Record<DiagnosticVerdict, string> = {
 }
 
 const VERDICT_CLASSES: Record<DiagnosticVerdict, string> = {
+  caixinha: 'text-brand-500',
   imported: 'text-brand-500',
   duplicate: 'text-amber-600 dark:text-amber-400',
   beforeStart: 'text-light-secondary dark:text-dark-secondary',

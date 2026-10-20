@@ -1,16 +1,16 @@
 import { doc, getDocs, increment, writeBatch } from 'firebase/firestore'
 import { db } from '../../lib/firebase'
 import { caixinhasCollection } from '../caixinhas/api'
-import { caixinhaMovementsCollection } from '../caixinhas/movements'
-import type { Caixinha } from '../caixinhas/types'
-import { transactionDoc } from '../transactions/api'
+import { caixinhaMovementDoc, caixinhaMovementsCollection } from '../caixinhas/movements'
+import type { Caixinha, CaixinhaMovement } from '../caixinhas/types'
+import { accountDoc } from '../accounts/api'
+import { transactionDoc, transactionsCollection } from '../transactions/api'
 import type { Transaction } from '../transactions/types'
-import { sharesWord } from './matching'
-import { parseReserveMovement, type ReserveMovement } from './reserveParsing'
+import { ACCOUNT_WINDOW_DAYS, dayDistance, sharesWord } from './matching'
+import type { ReserveMovement } from './reserveParsing'
 
 // Mesmo limite de operações por writeBatch de imports/api.ts.
 const BATCH_LIMIT = 500
-const DESCRIPTION_MAX = 60 // mesmo teto do form de lançamento
 // Caixinha usada quando o banco não diz qual (ex.: "Aplicação RDB") e a
 // conta tem mais de uma (ou nenhuma) caixinha.
 const DEFAULT_CAIXINHA_NAME = 'Reserva'
@@ -47,93 +47,143 @@ function findCaixinha(
   return { caixinha, nameToCreate: name }
 }
 
-// Como o app descreve guardar/resgatar (caixinhaTransfers.ts) — o
-// lançamento do banco passa a aparecer igual no extrato.
-function appDescription(kind: ReserveMovement['kind'], caixinhaName: string): string {
-  return `${kind === 'guardar' ? 'Guardado' : 'Resgatado'} — ${caixinhaName}`.slice(0, DESCRIPTION_MAX)
+// O movimento da caixinha tem id derivado do lançamento do banco — é o
+// que marca "já aplicado", então rodar de novo nunca soma duas vezes.
+function movementIdFor(bankKey: string): string {
+  return `bank_${bankKey}`
 }
 
-// O movimento da caixinha tem id derivado do lançamento importado — é o
-// que marca "já aplicado", então rodar de novo (ou rodar sobre lançamentos
-// importados antes desta função existir) nunca soma duas vezes.
-function movementIdFor(transactionId: string): string {
-  return `bank_${transactionId}`
+// Mesma folga de data da conciliação de conta (matching.ts).
+const CLAIM_WINDOW_DAYS = ACCOUNT_WINDOW_DAYS
+
+export interface ReserveItem {
+  key: string // id do documento que o lançamento do banco tem/teria no app
+  accountId: string
+  date: string
+  amount: number
+  movement: ReserveMovement
+  // lançamento importado antes desta regra (virou despesa/receita): sai
+  // do extrato, sem mexer de novo no saldo da conta — o efeito dele já está lá
+  legacyTransactionId?: string
 }
 
-// O lançamento importado ("Dinheiro reservado X", despesa na conta) já é
-// o mesmo que o app cria ao "Guardar" numa caixinha — e já mexeu no saldo
-// da conta. Falta o lado da caixinha (saldo + histórico) e deixar claro no
-// extrato que foi caixinha ("Guardado — X"). Caixinha que ainda não existe
-// no app é criada na conta do lançamento.
-export async function applyBankReserveMovements(
+// Guardar/resgatar vindo do banco é reserva, não gasto nem receita (mesma
+// regra de caixinhas/caixinhaTransfers.ts): nunca vira Transaction. Pra
+// cada um:
+// 1. já aplicado antes (movimento bank_<id>) → nada a fazer;
+// 2. a pessoa já guardou/resgatou esse valor pelo app (movimento da mesma
+//    caixinha, mesmo tipo e valor, em até 10 dias) → o do app passa a ser
+//    "o" do banco, sem mexer em saldo nenhum;
+// 3. senão → move o saldo (conta → caixinha ou o contrário) e registra no
+//    histórico. Caixinha que ainda não existe no app é criada.
+export async function applyBankReserves(
   workspaceId: string,
-  transactions: Transaction[],
+  items: ReserveItem[],
   createdBy: string,
-): Promise<number> {
-  const candidates = transactions
-    .filter((t) => t.id.startsWith('pluggy_') && t.accountId !== undefined)
-    .map((t) => ({ transaction: t, movement: parseReserveMovement(t) }))
-    .filter((c): c is { transaction: Transaction; movement: ReserveMovement } => c.movement !== null)
-  if (candidates.length === 0) return 0
-
+): Promise<void> {
+  if (items.length === 0) return
   const [caixinhasSnap, movementsSnap] = await Promise.all([
     getDocs(caixinhasCollection(workspaceId)),
     getDocs(caixinhaMovementsCollection(workspaceId)),
   ])
   const caixinhas = caixinhasSnap.docs.map((d) => d.data())
-  const movementsById = new Map(movementsSnap.docs.map((d) => [d.id, d.data()]))
+  const movements = movementsSnap.docs.map((d) => d.data())
+  const appliedIds = new Set(movements.map((m) => m.id))
+  // movimentos feitos pelo app (não vindos do banco) que ainda podem ser
+  // reconhecidos como o mesmo de um lançamento do banco
+  const claimable = movements.filter(
+    (m) => !m.id.startsWith('bank_') && (m.type === 'guardar' || m.type === 'resgatar'),
+  )
 
-  // Cada lançamento são até 4 operações (caixinha nova, saldo, histórico,
-  // descrição).
-  const chunkSize = Math.floor(BATCH_LIMIT / 4)
-  let applied = 0
-  for (let start = 0; start < candidates.length; start += chunkSize) {
+  // Cada item são até 5 operações (caixinha nova, saldo da caixinha, saldo
+  // da conta, histórico, lançamento antigo).
+  const chunkSize = Math.floor(BATCH_LIMIT / 5)
+  for (let start = 0; start < items.length; start += chunkSize) {
     const batch = writeBatch(db)
     let writes = 0
-    for (const { transaction, movement } of candidates.slice(start, start + chunkSize)) {
-      const accountId = transaction.accountId as string
-      const existingMovement = movementsById.get(movementIdFor(transaction.id))
+    for (const item of items.slice(start, start + chunkSize)) {
+      const movementId = movementIdFor(item.key)
+      if (!appliedIds.has(movementId)) {
+        appliedIds.add(movementId)
+        const signed = item.movement.kind === 'guardar' ? item.amount : -item.amount
+        const found = findCaixinha(caixinhas, item.accountId, item.movement.name)
+        const accountCaixinhaIds = new Set(
+          caixinhas.filter((c) => c.accountId === item.accountId).map((c) => c.id),
+        )
 
-      // Já aplicado antes: só garante a descrição no formato do app.
-      let caixinha = existingMovement
-        ? caixinhas.find((c) => c.id === existingMovement.caixinhaId)
-        : undefined
-      if (!existingMovement) {
-        const found = findCaixinha(caixinhas, accountId, movement.name)
-        caixinha = found.caixinha
-        if (!caixinha) {
-          const ref = doc(caixinhasCollection(workspaceId))
-          caixinha = { id: ref.id, accountId, name: found.nameToCreate, balance: 0, createdBy }
-          batch.set(ref, caixinha)
-          caixinhas.push(caixinha)
+        const claimIndex = claimable.findIndex(
+          (m) =>
+            m.type === item.movement.kind &&
+            Math.abs(Math.abs(m.amount) - item.amount) < 0.005 &&
+            dayDistance(m.date, item.date) <= CLAIM_WINDOW_DAYS &&
+            (found.caixinha ? m.caixinhaId === found.caixinha.id : accountCaixinhaIds.has(m.caixinhaId)),
+        )
+        const movementRef = doc(caixinhaMovementsCollection(workspaceId), movementId)
+        if (claimIndex >= 0) {
+          // 2. já feito pelo app: troca o registro pelo do banco, saldos iguais
+          const [claimed] = claimable.splice(claimIndex, 1) as [CaixinhaMovement]
+          batch.delete(caixinhaMovementDoc(workspaceId, claimed.id))
+          batch.set(movementRef, { ...claimed, id: movementId, date: item.date })
+        } else {
+          // 3. novo: move o saldo
+          let caixinha = found.caixinha
+          if (!caixinha) {
+            const ref = doc(caixinhasCollection(workspaceId))
+            caixinha = {
+              id: ref.id,
+              accountId: item.accountId,
+              name: found.nameToCreate,
+              balance: 0,
+              createdBy,
+            }
+            batch.set(ref, caixinha)
+            caixinhas.push(caixinha)
+          }
+          batch.update(doc(caixinhasCollection(workspaceId), caixinha.id), { balance: increment(signed) })
+          caixinha.balance += signed
+          if (!item.legacyTransactionId) {
+            batch.update(accountDoc(workspaceId, item.accountId), { balance: increment(-signed) })
+          }
+          batch.set(movementRef, {
+            id: movementId,
+            caixinhaId: caixinha.id,
+            type: item.movement.kind,
+            amount: signed,
+            date: item.date,
+            createdBy,
+          })
         }
-
-        const signed = movement.kind === 'guardar' ? transaction.amount : -transaction.amount
-        batch.update(doc(caixinhasCollection(workspaceId), caixinha.id), { balance: increment(signed) })
-        caixinha.balance += signed
-        const movementRef = doc(caixinhaMovementsCollection(workspaceId), movementIdFor(transaction.id))
-        batch.set(movementRef, {
-          id: movementRef.id,
-          caixinhaId: caixinha.id,
-          type: movement.kind,
-          amount: signed,
-          date: transaction.date,
-          createdBy,
-        })
-        applied++
         writes++
       }
-
-      if (caixinha) {
-        const description = appDescription(movement.kind, caixinha.name)
-        if (transaction.description !== description) {
-          batch.update(transactionDoc(workspaceId, transaction.id), { description })
-          transaction.description = description
-          writes++
-        }
+      if (item.legacyTransactionId) {
+        batch.delete(transactionDoc(workspaceId, item.legacyTransactionId))
+        writes++
       }
     }
     if (writes > 0) await batch.commit()
   }
-  return applied
+}
+
+// Lançamentos "Guardado — X" / "Resgatado — X" que o app criava antes de
+// caixinha virar reserva: saem do extrato (e dos totais do mês). O saldo
+// da conta e o da caixinha já estão certos — o movimento no histórico da
+// caixinha foi gravado junto — então é só apagar.
+export function isLegacyCaixinhaTransaction(t: Transaction): boolean {
+  return (
+    t.accountId !== undefined &&
+    !t.id.startsWith('pluggy_') &&
+    ((t.type === 'expense' && t.description.startsWith('Guardado — ')) ||
+      (t.type === 'income' && t.description.startsWith('Resgatado — ')))
+  )
+}
+
+export async function removeLegacyCaixinhaTransactions(workspaceId: string): Promise<void> {
+  const snapshot = await getDocs(transactionsCollection(workspaceId))
+  const legacy = snapshot.docs.map((d) => d.data()).filter(isLegacyCaixinhaTransaction)
+  if (legacy.length === 0) return
+  for (let start = 0; start < legacy.length; start += BATCH_LIMIT) {
+    const batch = writeBatch(db)
+    for (const t of legacy.slice(start, start + BATCH_LIMIT)) batch.delete(transactionDoc(workspaceId, t.id))
+    await batch.commit()
+  }
 }

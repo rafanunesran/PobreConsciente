@@ -14,7 +14,12 @@ import { transactionDoc, transactionsCollection } from '../transactions/api'
 import { formatDate, parseDate, roundToCents } from '../transactions/dateUtils'
 import type { Transaction, TransactionType } from '../transactions/types'
 import { listPluggyConfigs, recordPluggySync } from './api'
-import { applyBankReserveMovements } from './caixinhaSync'
+import {
+  applyBankReserves,
+  isLegacyCaixinhaTransaction,
+  removeLegacyCaixinhaTransactions,
+  type ReserveItem,
+} from './caixinhaSync'
 import { parseReserveMovement } from './reserveParsing'
 import { authenticate, listAccounts, listTransactions } from './pluggyClient'
 import {
@@ -455,6 +460,13 @@ async function runSync(
   let imported = 0
   const errors: string[] = []
   const startedAt = new Date().toISOString()
+
+  // "Guardado — X"/"Resgatado — X" que o app criava antes de caixinha virar
+  // reserva saem antes de conciliar — senão viram par de um lançamento do banco.
+  if (ctx.transactions.some(isLegacyCaixinhaTransaction)) {
+    await removeLegacyCaixinhaTransactions(workspaceId)
+    ctx.transactions = ctx.transactions.filter((t) => !isLegacyCaixinhaTransaction(t))
+  }
   const failed = new Map<string, string>() // ownerUid → erro
 
   const fetched: FetchedLink[] = []
@@ -482,6 +494,51 @@ async function runSync(
     }
   }
 
+  // Caixinha (guardar/resgatar) é reserva, não gasto nem receita: não vira
+  // lançamento — o valor vai direto pra caixinha (ver caixinhaSync.ts).
+  // Inclui o que já tinha sido importado como despesa/receita antes.
+  try {
+    const existingIds = new Set(ctx.transactions.map((t) => t.id))
+    const items: ReserveItem[] = []
+    const seen = new Set<string>()
+    for (const f of fetched) {
+      if (!('accountId' in f.link) || failed.has(f.config.ownerUid)) continue
+      for (const entry of f.entries) {
+        if (transferKeys.has(entry.docId) || seen.has(entry.docId)) continue
+        const movement = parseReserveMovement(entry)
+        if (!movement) continue
+        seen.add(entry.docId)
+        transferKeys.add(entry.docId)
+        items.push({
+          key: entry.docId,
+          accountId: f.link.accountId,
+          date: entry.date,
+          amount: entry.amount,
+          movement,
+          ...(existingIds.has(entry.docId) ? { legacyTransactionId: entry.docId } : {}),
+        })
+      }
+    }
+    for (const t of ctx.transactions) {
+      if (!t.id.startsWith('pluggy_') || t.accountId === undefined || seen.has(t.id)) continue
+      const movement = parseReserveMovement(t)
+      if (!movement) continue
+      items.push({
+        key: t.id,
+        accountId: t.accountId,
+        date: t.date,
+        amount: t.amount,
+        movement,
+        legacyTransactionId: t.id,
+      })
+    }
+    await applyBankReserves(workspaceId, items, createdBy)
+    const removed = new Set(items.flatMap((i) => (i.legacyTransactionId ? [i.legacyTransactionId] : [])))
+    ctx.transactions = ctx.transactions.filter((t) => !removed.has(t.id))
+  } catch (err) {
+    errors.push(err instanceof Error ? err.message : 'Falha ao atualizar as caixinhas.')
+  }
+
   for (const f of fetched) {
     if (failed.has(f.config.ownerUid)) continue
     try {
@@ -498,15 +555,6 @@ async function runSync(
       at: startedAt,
       ...(error ? { error } : {}),
     }).catch(() => undefined)
-  }
-
-  // Depois de importar: reservas do Mercado Pago ("Dinheiro reservado X")
-  // também movimentam a caixinha correspondente. Roda sobre tudo que veio
-  // do banco, inclusive o importado antes disso existir (idempotente).
-  try {
-    await applyBankReserveMovements(workspaceId, ctx.transactions, createdBy)
-  } catch (err) {
-    errors.push(err instanceof Error ? err.message : 'Falha ao atualizar as caixinhas.')
   }
 
   // Por último: o saldo de cada conta vinculada passa a ser o que o banco
