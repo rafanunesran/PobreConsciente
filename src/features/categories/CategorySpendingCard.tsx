@@ -11,10 +11,6 @@ interface CategorySpendingCardProps {
   categories: Category[]
   cardsById: Map<string, CreditCard>
   selectedMonth: string // 'YYYY-MM'
-  // Transferências, reservas e resgates (ver moneyMovements.ts): entram como
-  // fatias próprias, depois das categorias, e o card passa a falar em
-  // entradas/saídas — não são receita nem despesa.
-  extraTotals?: Record<TransactionType, CategoryTotal[]>
 }
 
 // Além de ~6 fatias individuais, o resto vira "Outros" — mais que isso e o
@@ -22,10 +18,10 @@ interface CategorySpendingCardProps {
 const MAX_SLICES = 7
 const OTHER_COLOR = '#898781'
 
-function foldTotals(totals: CategoryTotal[], maxSlices = MAX_SLICES): CategoryTotal[] {
-  if (totals.length <= maxSlices) return totals
-  const visible = totals.slice(0, maxSlices - 1)
-  const rest = totals.slice(maxSlices - 1)
+function foldTotals(totals: CategoryTotal[]): CategoryTotal[] {
+  if (totals.length <= MAX_SLICES) return totals
+  const visible = totals.slice(0, MAX_SLICES - 1)
+  const rest = totals.slice(MAX_SLICES - 1)
   const otherValue = rest.reduce((sum, t) => sum + t.value, 0)
   return [...visible, { categoryId: '__other__', name: 'Outros', color: OTHER_COLOR, value: otherValue }]
 }
@@ -41,20 +37,13 @@ export function CategorySpendingCard({
   categories,
   cardsById,
   selectedMonth,
-  extraTotals,
 }: CategorySpendingCardProps) {
   const [type, setType] = useState<TransactionType>('expense')
-  const flow = extraTotals !== undefined
-  const labels = flow
-    ? { title: 'Entradas e saídas por categoria', expense: 'Saídas', income: 'Entradas' }
-    : { title: 'Gastos por categoria', expense: 'Despesas', income: 'Receitas' }
-  const label = type === 'expense' ? labels.expense : labels.income
 
-  const slices = useMemo(() => {
-    const extras = extraTotals?.[type] ?? []
-    const byCategory = categoryTotals(transactions, categories, cardsById, selectedMonth, type)
-    return [...foldTotals(byCategory, MAX_SLICES - extras.length), ...extras]
-  }, [transactions, categories, cardsById, selectedMonth, type, extraTotals])
+  const slices = useMemo(
+    () => foldTotals(categoryTotals(transactions, categories, cardsById, selectedMonth, type)),
+    [transactions, categories, cardsById, selectedMonth, type],
+  )
 
   const total = slices.reduce((sum, s) => sum + s.value, 0)
 
@@ -71,7 +60,7 @@ export function CategorySpendingCard({
     <Card className="flex flex-col gap-4">
       <div className="flex items-center justify-between">
         <p className="text-sm font-medium text-light-primary dark:text-dark-primary">
-          {labels.title}
+          Gastos por categoria
         </p>
         <div className="flex rounded-full border border-border-light p-0.5 dark:border-border-dark">
           <button
@@ -82,7 +71,7 @@ export function CategorySpendingCard({
               type === 'expense' ? 'bg-danger/10 text-danger' : 'text-light-secondary dark:text-dark-secondary',
             )}
           >
-            {labels.expense}
+            Despesas
           </button>
           <button
             type="button"
@@ -94,18 +83,14 @@ export function CategorySpendingCard({
                 : 'text-light-secondary dark:text-dark-secondary',
             )}
           >
-            {labels.income}
+            Receitas
           </button>
         </div>
       </div>
 
       {slices.length === 0 ? (
         <p className="py-8 text-center text-sm text-light-secondary dark:text-dark-secondary">
-          {flow
-            ? `Nenhuma ${label.toLowerCase().slice(0, -1)} neste mês`
-            : type === 'expense'
-              ? 'Nenhuma despesa neste mês'
-              : 'Nenhuma receita neste mês'}
+          {type === 'expense' ? 'Nenhuma despesa neste mês' : 'Nenhuma receita neste mês'}
         </p>
       ) : (
         <div className="flex flex-col items-center gap-5 sm:flex-row sm:justify-center">
@@ -113,7 +98,7 @@ export function CategorySpendingCard({
             viewBox="0 0 160 160"
             className="h-40 w-40 shrink-0"
             role="img"
-            aria-label={`${labels.title} — ${label.toLowerCase()}`}
+            aria-label={`Gastos por categoria — ${type === 'expense' ? 'despesas' : 'receitas'}`}
           >
             <g transform={`rotate(-90 ${CENTER} ${CENTER})`}>
               {arcs.map((arc) => (
@@ -145,7 +130,7 @@ export function CategorySpendingCard({
               textAnchor="middle"
               className="fill-light-secondary text-[10px] dark:fill-dark-secondary"
             >
-              {label}
+              {type === 'expense' ? 'Despesas' : 'Receitas'}
             </text>
           </svg>
 

@@ -4,17 +4,21 @@ import { transferLogsCollection, type AccountTransferLog } from '../accounts/tra
 import { caixinhasCollection } from '../caixinhas/api'
 import { caixinhaMovementsCollection } from '../caixinhas/movements'
 import type { Caixinha, CaixinhaMovement } from '../caixinhas/types'
-import type { TransactionType } from '../transactions/types'
-import type { CategoryTotal } from './categoryTotals'
 
 // Dinheiro que só muda de lugar — transferência entre contas, guardar e
-// resgatar caixinha — não é receita nem despesa, então não tem categoria
-// de verdade. Na divisão por categoria do extrato ele aparece em
-// "categorias" fixas próprias, pra pessoa ver tudo o que entrou e saiu da
-// conta no mês, sem mexer nos totais de receitas/despesas.
-export const TRANSFER_SLICE = { categoryId: '__transfers__', name: 'Transferências', color: '#3b82f6' }
-export const RESERVE_SLICE = { categoryId: '__reserves__', name: 'Reservas', color: '#a855f7' }
-export const REDEEM_SLICE = { categoryId: '__redeems__', name: 'Resgates', color: '#14b8a6' }
+// resgatar caixinha — não é receita nem despesa. No extrato ele aparece
+// como linha à parte, só pra conferência: nunca entra nos totais de
+// receitas/despesas/saldo do mês (senão o valor contaria duas vezes).
+export interface MoneyMovementRow {
+  key: string
+  kind: 'transfer' | 'reserve'
+  date: string // 'YYYY-MM-DD'
+  direction: 'in' | 'out' // entrou na conta / saiu dela
+  amount: number // sempre positivo
+  description: string
+  accountId?: string
+  caixinhaId?: string
+}
 
 export interface MoneyMovements {
   transfers: AccountTransferLog[]
@@ -54,40 +58,48 @@ export function useMoneyMovements(uid: string): MoneyMovements {
   return { transfers, caixinhaMovements, caixinhas }
 }
 
-// Totais do mês por sentido: saída = transferência enviada + guardado na
-// caixinha; entrada = transferência recebida + resgatado. Com `accountId`,
-// só o que é dessa conta (caixinha conta pela conta a que pertence).
-// Rendimento e ajuste ficam de fora — rendimento já é receita de verdade.
-export function moneyMovementTotals(
+// Linhas do mês: transferências enviadas/recebidas e guardar/resgatar
+// caixinha. Com `accountId`, só o que é dessa conta (caixinha conta pela
+// conta a que pertence). Rendimento e ajuste ficam de fora — rendimento já
+// é receita de verdade.
+export function moneyMovementRows(
   movements: MoneyMovements,
   selectedMonth: string,
   accountId?: string,
-): Record<TransactionType, CategoryTotal[]> {
-  const caixinhaAccount = new Map(movements.caixinhas.map((c) => [c.id, c.accountId]))
-  let transfersOut = 0
-  let transfersIn = 0
-  let reserved = 0
-  let redeemed = 0
+): MoneyMovementRow[] {
+  const caixinhasById = new Map(movements.caixinhas.map((c) => [c.id, c]))
+  const rows: MoneyMovementRow[] = []
 
   for (const t of movements.transfers) {
     if (!t.date.startsWith(selectedMonth)) continue
     if (accountId !== undefined && t.accountId !== accountId) continue
-    if (t.type === 'expense') transfersOut += t.amount
-    else transfersIn += t.amount
+    rows.push({
+      key: `transfer-${t.id}`,
+      kind: 'transfer',
+      date: t.date,
+      direction: t.type === 'expense' ? 'out' : 'in',
+      amount: t.amount,
+      description: t.description || 'Transferência',
+      accountId: t.accountId,
+    })
   }
   for (const m of movements.caixinhaMovements) {
     if (m.type !== 'guardar' && m.type !== 'resgatar') continue
     if (!m.date.startsWith(selectedMonth)) continue
+    const caixinha = caixinhasById.get(m.caixinhaId)
     // caixinha encerrada: não dá mais pra saber a conta, só entra no geral
-    if (accountId !== undefined && caixinhaAccount.get(m.caixinhaId) !== accountId) continue
-    if (m.type === 'guardar') reserved += Math.abs(m.amount)
-    else redeemed += Math.abs(m.amount)
+    if (accountId !== undefined && caixinha?.accountId !== accountId) continue
+    const name = caixinha?.name ?? 'caixinha encerrada'
+    rows.push({
+      key: `reserve-${m.id}`,
+      kind: 'reserve',
+      date: m.date,
+      direction: m.type === 'guardar' ? 'out' : 'in',
+      amount: Math.abs(m.amount),
+      description: m.type === 'guardar' ? `Guardado — ${name}` : `Resgatado — ${name}`,
+      accountId: caixinha?.accountId,
+      caixinhaId: caixinha?.id,
+    })
   }
-
-  const slice = (base: typeof TRANSFER_SLICE, value: number): CategoryTotal[] =>
-    value > 0 ? [{ ...base, value }] : []
-  return {
-    expense: [...slice(TRANSFER_SLICE, transfersOut), ...slice(RESERVE_SLICE, reserved)],
-    income: [...slice(TRANSFER_SLICE, transfersIn), ...slice(REDEEM_SLICE, redeemed)],
-  }
+  return rows
 }

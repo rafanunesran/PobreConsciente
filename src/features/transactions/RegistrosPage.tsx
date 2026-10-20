@@ -8,8 +8,7 @@ import { useAccounts } from '../accounts/useAccounts'
 import { useCards } from '../cards/useCards'
 import { useCategories } from '../categories/useCategories'
 import { TransactionsGrid } from './TransactionsGrid'
-import { CategorySpendingCard } from '../categories/CategorySpendingCard'
-import { moneyMovementTotals, useMoneyMovements } from '../categories/moneyMovements'
+import { moneyMovementRows, useMoneyMovements } from '../categories/moneyMovements'
 import { MonthSelector } from '../../components/ui/MonthSelector'
 import { currentYearMonth } from './dateUtils'
 import { Button } from '../../components/ui/Button'
@@ -47,8 +46,8 @@ export function RegistrosPage() {
     [categories],
   )
   const moneyMovements = useMoneyMovements(workspaceId ?? '')
-  const movementTotals = useMemo(
-    () => moneyMovementTotals(moneyMovements, selectedMonth),
+  const movementRows = useMemo(
+    () => moneyMovementRows(moneyMovements, selectedMonth),
     [moneyMovements, selectedMonth],
   )
   const tags = useMemo(() => collectTags(transactions), [transactions])
@@ -150,24 +149,16 @@ export function RegistrosPage() {
               cardsById={cardsById}
             />
           ) : (
-            <>
-              <CategorySpendingCard
-                transactions={transactions}
-                categories={categories}
-                cardsById={cardsById}
-                selectedMonth={selectedMonth}
-                extraTotals={movementTotals}
-              />
-              <TransactionsGrid
-                workspaceId={workspaceId}
-                transactions={transactions}
-                categoriesById={categoriesById}
-                accountsById={accountsById}
-                cardsById={cardsById}
-                selectedMonth={selectedMonth}
-                highlightKey={highlightKey}
-              />
-            </>
+            <TransactionsGrid
+              workspaceId={workspaceId}
+              transactions={transactions}
+              categoriesById={categoriesById}
+              accountsById={accountsById}
+              cardsById={cardsById}
+              selectedMonth={selectedMonth}
+              highlightKey={highlightKey}
+              moneyMovements={movementRows}
+            />
           )}
         </>
       )}
