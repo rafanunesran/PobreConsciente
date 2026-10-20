@@ -2,6 +2,7 @@ import { doc, getDoc, getDocs, writeBatch } from 'firebase/firestore'
 import { getUserProfile } from '../family/userProfiles'
 import { db } from '../../lib/firebase'
 import { accountDoc, accountsCollection } from '../accounts/api'
+import { type AccountTransferLog, listTransferLogIds, saveTransferLogs } from '../accounts/transferLog'
 import { caixinhaMovementsCollection } from '../caixinhas/movements'
 import type { CaixinhaMovement } from '../caixinhas/types'
 import type { CreditCard } from '../cards/types'
@@ -360,12 +361,21 @@ async function detectTransfers(
   const sides: TransferSide[] = []
   const skip = new Set<string>()
   const seen = new Set<string>()
+  // o que cada chave é, pra registrar no log de transferências (transferLog.ts)
+  const details = new Map<string, Omit<AccountTransferLog, 'id' | 'createdBy'>>()
   for (const f of fetched) {
     if (!('accountId' in f.link)) continue
     for (const key of f.ownTransferKeys) skip.add(key)
     for (const entry of f.pairingEntries) {
       if (seen.has(entry.docId)) continue
       seen.add(entry.docId)
+      details.set(entry.docId, {
+        accountId: f.link.accountId,
+        type: entry.type,
+        amount: entry.amount,
+        date: entry.date,
+        description: entry.description,
+      })
       // Pix/TED pra (ou de) alguém da família — mesmo sem a conta do outro
       // conectada, o dinheiro não saiu da casa (ver FamilyIdentity)
       if (
@@ -383,6 +393,7 @@ async function detectTransfers(
   // receita/despesa antes desta regra existir
   for (const t of ctx.transactions) {
     if (!t.id.startsWith('pluggy_') || t.accountId === undefined || seen.has(t.id)) continue
+    details.set(t.id, { accountId: t.accountId, type: t.type, amount: t.amount, date: t.date, description: t.description })
     if (
       reserveMovementOf(ctx, t.accountId, t) === null &&
       isFamilyCounterpart(undefined, t.description, family)
@@ -394,6 +405,22 @@ async function detectTransfers(
     sides.push({ key: t.id, appAccountId: t.accountId, date: t.date, type: t.type, amount: t.amount })
   }
   for (const key of findTransferPairs(sides)) skip.add(key)
+
+  // Não vira lançamento, mas aparece como "Transferências" na divisão por
+  // categoria do extrato. Só o que ainda não está no log; falhar aqui (regras
+  // do Firestore sem a coleção) não impede a sincronização.
+  try {
+    const logged = await listTransferLogIds(ctx.workspaceId)
+    const logs: AccountTransferLog[] = []
+    for (const key of skip) {
+      const detail = details.get(key)
+      if (detail && !logged.has(key) && reserveMovementOf(ctx, detail.accountId, detail) === null)
+        logs.push({ id: key, ...detail, createdBy: ctx.createdBy })
+    }
+    await saveTransferLogs(ctx.workspaceId, logs)
+  } catch {
+    // só visualização
+  }
 
   const toDelete = [...skip].filter((key) => ctx.transactions.some((t) => t.id === key))
   if (toDelete.length > 0) {

@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { transferBetweenAccounts } from './accountTransfers'
+import { useAuthStore } from '../../stores/authStore'
 import { accountTransferSchema, type AccountTransferFormData } from './schemas'
 import type { Account } from './types'
 import { Button } from '../../components/ui/Button'
@@ -19,6 +20,7 @@ interface QuickTransferDialogProps {
 // Transferência rápida a partir do tile da conta — a origem já vem fixa,
 // então só pergunta quanto e pra onde. Mesma regra da AccountTransferPage.
 export function QuickTransferDialog({ workspaceId, from, accounts, onClose }: QuickTransferDialogProps) {
+  const user = useAuthStore((state) => state.user)
   const [formError, setFormError] = useState<string | null>(null)
   const destinations = accounts.filter((a) => a.id !== from.id)
 
@@ -34,12 +36,13 @@ export function QuickTransferDialog({ workspaceId, from, accounts, onClose }: Qu
 
   async function onSubmit(data: AccountTransferFormData) {
     setFormError(null)
+    if (!user) return
     if (data.amount > from.balance) {
       setFormError('O valor não pode ser maior que o saldo da conta de origem.')
       return
     }
     try {
-      await transferBetweenAccounts(workspaceId, from.id, data.toAccountId, data.amount)
+      await transferBetweenAccounts(workspaceId, from.id, data.toAccountId, data.amount, user.uid)
       onClose()
     } catch {
       setFormError('Não foi possível concluir a transferência. Tente novamente.')
