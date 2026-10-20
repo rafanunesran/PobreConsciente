@@ -10,8 +10,7 @@ import { useCards } from '../cards/useCards'
 import { useCaixinhas } from '../caixinhas/useCaixinhas'
 import { CaixinhaCard } from '../caixinhas/CaixinhaCard'
 import { TransactionsGrid } from '../transactions/TransactionsGrid'
-import { CategorySpendingCard } from '../categories/CategorySpendingCard'
-import { moneyMovementTotals, useMoneyMovements } from '../categories/moneyMovements'
+import { moneyMovementRows, useMoneyMovements } from '../categories/moneyMovements'
 import { MonthSelector } from '../../components/ui/MonthSelector'
 import { currentYearMonth } from '../transactions/dateUtils'
 import { ACCOUNT_TYPE_LABELS } from './types'
@@ -47,8 +46,8 @@ export function AccountDetailPage() {
   const cardsById = useMemo(() => new Map(cards.map((c) => [c.id, c])), [cards])
 
   const moneyMovements = useMoneyMovements(workspaceId ?? '')
-  const movementTotals = useMemo(
-    () => moneyMovementTotals(moneyMovements, selectedMonth, accountId),
+  const movementRows = useMemo(
+    () => moneyMovementRows(moneyMovements, selectedMonth, accountId),
     [moneyMovements, selectedMonth, accountId],
   )
 
@@ -141,13 +140,6 @@ export function AccountDetailPage() {
         <div className="flex flex-col gap-6 lg:flex-row">
           <div className="flex flex-col gap-4 lg:w-2/3">
             <MonthSelector value={selectedMonth} onChange={setSelectedMonth} />
-            <CategorySpendingCard
-              transactions={accountTransactions}
-              categories={categories}
-              cardsById={cardsById}
-              selectedMonth={selectedMonth}
-              extraTotals={movementTotals}
-            />
             <TransactionsGrid
               workspaceId={workspaceId ?? ''}
               transactions={accountTransactions}
@@ -155,6 +147,7 @@ export function AccountDetailPage() {
               accountsById={accountsById}
               cardsById={cardsById}
               selectedMonth={selectedMonth}
+              moneyMovements={movementRows}
             />
           </div>
 

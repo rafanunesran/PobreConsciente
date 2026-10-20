@@ -11,6 +11,8 @@ import type { Account } from '../accounts/types'
 import type { CreditCard } from '../cards/types'
 import { useBulkPay, invoiceKey } from './useBulkPay'
 import { BulkPayBar } from './BulkPayBar'
+import { MoneyMovementRowCard } from './MoneyMovementRowCard'
+import type { MoneyMovementRow } from '../categories/moneyMovements'
 
 interface TransactionsGridProps {
   workspaceId: string
@@ -24,20 +26,19 @@ interface TransactionsGridProps {
   // id do lançamento (ou invoiceKey da fatura) recém-salvo — rola até ele e
   // destaca a linha, pra pessoa ver que o registro entrou.
   highlightKey?: string | null
+  // Transferências e reservas do mês (ver categories/moneyMovements.ts) —
+  // com elas, aparece o card "Reserva" e o "Saldo" lista também essas
+  // linhas, só pra conferência: nunca somam em nenhum total.
+  moneyMovements?: MoneyMovementRow[]
 }
 
-type TypeFilter = 'all' | 'expense' | 'income' | 'pending'
-
-const FILTERS: { value: TypeFilter; label: string }[] = [
-  { value: 'all', label: 'Tudo' },
-  { value: 'expense', label: 'Despesas' },
-  { value: 'income', label: 'Receitas' },
-  { value: 'pending', label: 'Pendentes' },
-]
+// Os cards do resumo são o filtro: Saldo = tudo, Reserva = só caixinha.
+type TypeFilter = 'all' | 'expense' | 'income' | 'reserve' | 'pending'
 
 type Row =
   | { kind: 'transaction'; key: string; date: string; signed: number; transaction: Transaction }
   | { kind: 'invoice'; key: string; date: string; signed: number; group: CardInvoiceGroup }
+  | { kind: 'movement'; key: string; date: string; signed: number; movement: MoneyMovementRow }
 
 function dayLabel(date: string): string {
   const d = new Date(`${date}T00:00:00`)
@@ -55,6 +56,7 @@ export function TransactionsGrid({
   selectedMonth,
   pendingOnly = false,
   highlightKey = null,
+  moneyMovements,
 }: TransactionsGridProps) {
   const [filter, setFilter] = useState<TypeFilter>('all')
   const cards = useMemo(() => Array.from(cardsById.values()), [cardsById])
@@ -101,8 +103,8 @@ export function TransactionsGrid({
   // Despesas e receitas numa lista só, em ordem cronológica (mais recente
   // primeiro) — o filtro decide o que aparece; os totais do resumo não mudam.
   const { visibleTransactions, visibleInvoices } = useMemo(() => {
-    const wantExpense = filter !== 'income'
-    const wantIncome = filter !== 'expense'
+    const wantExpense = filter !== 'income' && filter !== 'reserve'
+    const wantIncome = filter !== 'expense' && filter !== 'reserve'
     const onlyPending = filter === 'pending'
     return {
       visibleTransactions: [...(wantExpense ? expenses : []), ...(wantIncome ? incomes : [])].filter(
@@ -112,6 +114,16 @@ export function TransactionsGrid({
       visibleInvoices: [...(wantExpense ? expenseGroups : []), ...(wantIncome ? incomeGroups : [])],
     }
   }, [filter, expenses, incomes, expenseGroups, incomeGroups])
+
+  const visibleMovements = useMemo(
+    () =>
+      filter === 'all'
+        ? (moneyMovements ?? [])
+        : filter === 'reserve'
+          ? (moneyMovements ?? []).filter((m) => m.kind === 'reserve')
+          : [],
+    [filter, moneyMovements],
+  )
 
   const days = useMemo(() => {
     const rows: Row[] = [
@@ -127,20 +139,24 @@ export function TransactionsGrid({
       ...visibleInvoices.map(
         (g): Row => ({ kind: 'invoice', key: invoiceKey(g), date: g.dueDate, signed: -g.unpaidAmount, group: g }),
       ),
+      // signed 0: transferência/reserva não muda o total do dia
+      ...visibleMovements.map((m): Row => ({ kind: 'movement', key: m.key, date: m.date, signed: 0, movement: m })),
     ].sort((a, b) => b.date.localeCompare(a.date))
 
-    const byDay: { date: string; rows: Row[]; total: number }[] = []
+    const byDay: { date: string; rows: Row[]; total: number; counted: number }[] = []
     for (const row of rows) {
+      const counted = row.kind === 'movement' ? 0 : 1
       const last = byDay[byDay.length - 1]
       if (last && last.date === row.date) {
         last.rows.push(row)
         last.total += row.signed
+        last.counted += counted
       } else {
-        byDay.push({ date: row.date, rows: [row], total: row.signed })
+        byDay.push({ date: row.date, rows: [row], total: row.signed, counted })
       }
     }
     return byDay
-  }, [visibleTransactions, visibleInvoices])
+  }, [visibleTransactions, visibleInvoices, visibleMovements])
 
   useEffect(() => {
     if (!highlightKey) return
@@ -158,51 +174,74 @@ export function TransactionsGrid({
   })
 
   const resultado = totalIncomes - totalExpenses
+  // guardado menos resgatado no mês
+  const reservaLiquida = (moneyMovements ?? [])
+    .filter((m) => m.kind === 'reserve')
+    .reduce((sum, m) => sum + (m.direction === 'out' ? m.amount : -m.amount), 0)
+
+  const stats: { value: TypeFilter; label: string; amount: number; tone: string }[] = [
+    { value: 'income', label: 'Receitas', amount: totalIncomes, tone: 'text-brand-500' },
+    { value: 'expense', label: 'Despesas', amount: totalExpenses, tone: 'text-danger' },
+    {
+      value: 'all',
+      label: 'Saldo',
+      amount: resultado,
+      tone: resultado >= 0 ? 'text-brand-500' : 'text-danger',
+    },
+    ...(moneyMovements
+      ? [{ value: 'reserve' as const, label: 'Reserva', amount: reservaLiquida, tone: 'text-light-primary dark:text-dark-primary' }]
+      : []),
+  ]
 
   return (
     <div className="flex flex-col gap-4">
       <BulkPayBar bulk={bulk} accounts={accounts} />
 
       {pendingOnly ? null : (
-        <div className="grid grid-cols-3 gap-2">
-          {[
-            { label: 'Receitas', value: totalIncomes, tone: 'text-brand-500' },
-            { label: 'Despesas', value: totalExpenses, tone: 'text-danger' },
-            { label: 'Saldo', value: resultado, tone: resultado >= 0 ? 'text-brand-500' : 'text-danger' },
-          ].map((stat) => (
-            <div
-              key={stat.label}
-              className="min-w-0 rounded-xl border border-border-light bg-surface-light px-3 py-2 dark:border-transparent dark:bg-surface-dark-elevated"
+        <div
+          className={cn('grid gap-2', stats.length === 4 ? 'grid-cols-2 sm:grid-cols-4' : 'grid-cols-3')}
+          role="tablist"
+          aria-label="Filtrar lançamentos"
+        >
+          {stats.map((stat) => (
+            <button
+              key={stat.value}
+              type="button"
+              role="tab"
+              aria-selected={filter === stat.value}
+              onClick={() => setFilter(stat.value)}
+              className={cn(
+                'min-w-0 rounded-xl border bg-surface-light px-3 py-2 text-left transition-colors duration-200 dark:bg-surface-dark-elevated',
+                filter === stat.value
+                  ? 'border-brand-500 ring-1 ring-brand-500'
+                  : 'border-border-light dark:border-transparent',
+              )}
             >
               <p className="text-[11px] text-light-secondary dark:text-dark-secondary">{stat.label}</p>
               <p className={cn('tabular truncate text-sm font-bold', stat.tone)}>
-                {stat.value < 0 ? '− ' : ''}
-                {formatBRL(Math.abs(stat.value))}
+                {stat.amount < 0 ? '− ' : ''}
+                {formatBRL(Math.abs(stat.amount))}
               </p>
-            </div>
+            </button>
           ))}
         </div>
       )}
 
       {pendingOnly ? null : (
-        <div className="flex gap-2 overflow-x-auto" role="tablist" aria-label="Filtrar lançamentos">
-          {FILTERS.map((f) => (
-            <button
-              key={f.value}
-              type="button"
-              role="tab"
-              aria-selected={filter === f.value}
-              onClick={() => setFilter(f.value)}
-              className={cn(
-                'shrink-0 rounded-full border px-4 py-1.5 text-sm font-medium transition-colors duration-200',
-                filter === f.value
-                  ? 'border-brand-500 bg-brand-500 text-white'
-                  : 'border-border-light text-light-secondary hover:text-light-primary dark:border-border-dark dark:text-dark-secondary dark:hover:text-dark-primary',
-              )}
-            >
-              {f.label}
-            </button>
-          ))}
+        <div className="flex gap-2">
+          <button
+            type="button"
+            aria-pressed={filter === 'pending'}
+            onClick={() => setFilter(filter === 'pending' ? 'all' : 'pending')}
+            className={cn(
+              'shrink-0 rounded-full border px-4 py-1.5 text-sm font-medium transition-colors duration-200',
+              filter === 'pending'
+                ? 'border-brand-500 bg-brand-500 text-white'
+                : 'border-border-light text-light-secondary hover:text-light-primary dark:border-border-dark dark:text-dark-secondary dark:hover:text-dark-primary',
+            )}
+          >
+            Só pendentes
+          </button>
         </div>
       )}
 
@@ -214,7 +253,9 @@ export function TransactionsGrid({
               ? 'Nenhuma despesa neste mês.'
               : filter === 'income'
                 ? 'Nenhuma receita neste mês.'
-                : 'Nenhum lançamento neste mês. Toque em + para adicionar.'}
+                : filter === 'reserve'
+                  ? 'Nada guardado nem resgatado neste mês.'
+                  : 'Nenhum lançamento neste mês. Toque em + para adicionar.'}
         </div>
       ) : (
         <div className="flex flex-col gap-4">
@@ -224,20 +265,27 @@ export function TransactionsGrid({
                 <h3 className="text-sm font-semibold text-light-secondary first-letter:uppercase dark:text-dark-secondary">
                   {dayLabel(day.date)}
                 </h3>
-                <span
-                  className={cn(
-                    'tabular text-xs font-medium',
-                    day.total >= 0 ? 'text-brand-500' : 'text-light-secondary dark:text-dark-secondary',
-                  )}
-                >
-                  {day.total >= 0 ? '+ ' : '− '}
-                  {formatBRL(Math.abs(day.total))}
-                </span>
+                {day.counted > 0 ? (
+                  <span
+                    className={cn(
+                      'tabular text-xs font-medium',
+                      day.total >= 0 ? 'text-brand-500' : 'text-light-secondary dark:text-dark-secondary',
+                    )}
+                  >
+                    {day.total >= 0 ? '+ ' : '− '}
+                    {formatBRL(Math.abs(day.total))}
+                  </span>
+                ) : null}
               </div>
               <div className="rounded-2xl border border-border-light bg-surface-light divide-y divide-border-light overflow-hidden dark:border-transparent dark:bg-surface-dark-elevated dark:divide-border-dark">
               {day.rows.map((row) => (
                 <div key={row.key} id={`row-${row.key}`} className="scroll-mt-24">
-                  {row.kind === 'invoice' ? (
+                  {row.kind === 'movement' ? (
+                    <MoneyMovementRowCard
+                      row={row.movement}
+                      linkedName={accountsById.get(row.movement.accountId ?? '')?.name}
+                    />
+                  ) : row.kind === 'invoice' ? (
                     <CardInvoiceRowCard
                       group={row.group}
                       selected={bulk.selectedInvoiceKeys.has(row.key)}
