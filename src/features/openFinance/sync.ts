@@ -32,6 +32,8 @@ import {
   CARD_WINDOW_DAYS,
   buildFamilyIdentity,
   type FamilyIdentity,
+  type TopUpSide,
+  findCreditTopUps,
   findTransferPairs,
   isFamilyCounterpart,
   isManualCandidate,
@@ -361,13 +363,37 @@ async function detectTransfers(
   const sides: TransferSide[] = []
   const skip = new Set<string>()
   const seen = new Set<string>()
+
+  // "Pix no crédito": a entrada "valor adicionado por cartão de crédito" e
+  // a saída de mesmo valor na conta são só passagem — o gasto é a cobrança
+  // no cartão. Não é transferência (não vai pro log), só não vira
+  // lançamento. Inclui o que já tinha sido importado.
+  const topUpSides: TopUpSide[] = []
+  for (const f of fetched) {
+    if (!('accountId' in f.link)) continue
+    for (const entry of f.pairingEntries)
+      topUpSides.push({ key: entry.docId, appAccountId: f.link.accountId, ...entry })
+  }
+  for (const t of ctx.transactions) {
+    if (!t.id.startsWith('pluggy_') || t.accountId === undefined) continue
+    topUpSides.push({
+      key: t.id,
+      appAccountId: t.accountId,
+      date: t.date,
+      type: t.type,
+      amount: t.amount,
+      description: t.description,
+    })
+  }
+  const creditTopUps = findCreditTopUps(topUpSides)
+
   // o que cada chave é, pra registrar no log de transferências (transferLog.ts)
   const details = new Map<string, Omit<AccountTransferLog, 'id' | 'createdBy'>>()
   for (const f of fetched) {
     if (!('accountId' in f.link)) continue
     for (const key of f.ownTransferKeys) skip.add(key)
     for (const entry of f.pairingEntries) {
-      if (seen.has(entry.docId)) continue
+      if (seen.has(entry.docId) || creditTopUps.has(entry.docId)) continue
       seen.add(entry.docId)
       details.set(entry.docId, {
         accountId: f.link.accountId,
@@ -393,7 +419,14 @@ async function detectTransfers(
   // receita/despesa antes desta regra existir
   for (const t of ctx.transactions) {
     if (!t.id.startsWith('pluggy_') || t.accountId === undefined || seen.has(t.id)) continue
-    details.set(t.id, { accountId: t.accountId, type: t.type, amount: t.amount, date: t.date, description: t.description })
+    if (creditTopUps.has(t.id)) continue
+    details.set(t.id, {
+      accountId: t.accountId,
+      type: t.type,
+      amount: t.amount,
+      date: t.date,
+      description: t.description,
+    })
     if (
       reserveMovementOf(ctx, t.accountId, t) === null &&
       isFamilyCounterpart(undefined, t.description, family)
@@ -422,6 +455,7 @@ async function detectTransfers(
     // só visualização
   }
 
+  for (const key of creditTopUps) skip.add(key)
   const toDelete = [...skip].filter((key) => ctx.transactions.some((t) => t.id === key))
   if (toDelete.length > 0) {
     // saldo das contas é corrigido no fim (saldo do banco), então basta apagar

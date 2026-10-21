@@ -270,3 +270,50 @@ export function isFamilyCounterpart(
   // Sem ela, o nome na descrição só vale se a linha for de transferência.
   return TRANSFER_DESCRIPTION.test(description) && mentionsFamilyMember(description, identity)
 }
+
+// "Pix no crédito" (Nubank e afins): o banco coloca o valor na conta
+// ("Valor adicionado na conta por cartão de crédito") e na mesma hora ele
+// sai no Pix. O gasto de verdade é a cobrança no cartão (valor + tarifa);
+// a entrada e a saída na conta são só passagem — nenhuma das duas conta.
+const CREDIT_TOP_UP =
+  /(valor|dinheiro|saldo)\s+adicionad[oa].*cart[aã]o\s+de\s+cr[eé]dito|pix\s+(no|com|parcelado\s+no)\s+cr[eé]dito|cr[eé]dito\s+(do|no)\s+cart[aã]o.*adicionad/i
+
+export function isCreditCardTopUp(entry: { description: string; type: TransactionType }): boolean {
+  return entry.type === 'income' && CREDIT_TOP_UP.test(entry.description)
+}
+
+export interface TopUpSide {
+  key: string
+  appAccountId: string
+  date: string
+  type: TransactionType
+  amount: number
+  description: string
+}
+
+// Chaves a ignorar: cada entrada "valor adicionado por cartão de crédito"
+// e a saída de mesmo valor na mesma conta, em até 1 dia (a mais próxima).
+// A entrada sai mesmo sem par — nunca é receita.
+export function findCreditTopUps(sides: TopUpSide[]): Set<string> {
+  const skip = new Set<string>()
+  const outs = sides.filter((s) => s.type === 'expense')
+  for (const topUp of sides.filter(isCreditCardTopUp)) {
+    skip.add(topUp.key)
+    const candidates = outs
+      .filter(
+        (o) =>
+          !skip.has(o.key) &&
+          o.appAccountId === topUp.appAccountId &&
+          Math.abs(o.amount - topUp.amount) < AMOUNT_EPSILON &&
+          dayDistance(o.date, topUp.date) <= 1,
+      )
+      .sort(
+        (a, b) =>
+          dayDistance(a.date, topUp.date) - dayDistance(b.date, topUp.date) ||
+          Number(TRANSFER_DESCRIPTION.test(b.description)) - Number(TRANSFER_DESCRIPTION.test(a.description)),
+      )
+    const out = candidates[0]
+    if (out) skip.add(out.key)
+  }
+  return skip
+}
