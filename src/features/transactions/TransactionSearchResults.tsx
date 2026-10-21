@@ -1,4 +1,10 @@
+import { useMemo } from 'react'
+import { ListChecks } from 'lucide-react'
 import { TransactionCompactCard } from './TransactionCompactCard'
+import { SelectionActionsBar } from './SelectionActionsBar'
+import { useTransactionSelection } from './useTransactionSelection'
+import { collectTags } from './tags'
+import { useWorkspaceStore } from '../../stores/workspaceStore'
 import { formatBRL } from '../../lib/utils'
 import type { Account } from '../accounts/types'
 import type { CreditCard } from '../cards/types'
@@ -21,6 +27,12 @@ export function TransactionSearchResults({
   accountsById,
   cardsById,
 }: TransactionSearchResultsProps) {
+  const workspaceId = useWorkspaceStore((state) => state.workspaceId)
+  const categories = useMemo(() => Array.from(categoriesById.values()), [categoriesById])
+  const knownTags = useMemo(() => collectTags(results), [results])
+  // Na busca é onde a seleção mais rende: busca "uber", "Todos", Categoria.
+  const resultsKey = useMemo(() => results.map((t) => t.id).join(','), [results])
+  const selection = useTransactionSelection(results, resultsKey)
   const totalExpenses = results.filter((t) => t.type === 'expense').reduce((sum, t) => sum + t.amount, 0)
   const totalIncomes = results.filter((t) => t.type === 'income').reduce((sum, t) => sum + t.amount, 0)
 
@@ -43,6 +55,26 @@ export function TransactionSearchResults({
         </div>
       </div>
 
+      {workspaceId && selection.active ? (
+        <SelectionActionsBar
+          workspaceId={workspaceId}
+          selection={selection}
+          categories={categories}
+          knownTags={knownTags}
+        />
+      ) : results.length > 0 ? (
+        <div className="flex justify-end">
+          <button
+            type="button"
+            onClick={() => selection.start()}
+            className="flex items-center gap-1.5 text-xs text-light-secondary transition-colors duration-200 hover:text-light-primary dark:text-dark-secondary dark:hover:text-dark-primary"
+          >
+            <ListChecks size={14} />
+            Selecionar
+          </button>
+        </div>
+      ) : null}
+
       {results.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-border-light py-10 text-center text-sm text-light-secondary dark:border-border-dark dark:text-dark-secondary">
           Nenhum lançamento encontrado.
@@ -59,6 +91,11 @@ export function TransactionSearchResults({
                   ? accountsById.get(transaction.accountId)?.name
                   : cardsById.get(transaction.cardId ?? '')?.name
               }
+              selectMode={selection.active}
+              selected={selection.selectedIds.has(transaction.id)}
+              onToggleSelect={() => selection.toggle(transaction.id)}
+              onLongPress={() => selection.start(transaction.id)}
+              categories={categories}
             />
           ))}
         </div>
