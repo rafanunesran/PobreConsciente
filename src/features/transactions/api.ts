@@ -3,6 +3,8 @@ import {
   doc,
   getDoc,
   runTransaction,
+  updateDoc,
+  writeBatch,
   type FirestoreDataConverter,
   type QueryDocumentSnapshot,
 } from 'firebase/firestore'
@@ -279,6 +281,75 @@ export async function updateTransaction(
       tags: data.tags ?? oldData.tags,
     })
   })
+}
+
+// Troca rápida só da categoria (botão no extrato), sem passar pelo form:
+// não mexe em valor, conta nem pagamento, então nenhum saldo muda. Vale só
+// pra este lançamento — a série (recorrência/parcelas) não é tocada — e
+// conta como escolha da pessoa, pra sugestão automática aprender com ela.
+export async function updateTransactionCategory(
+  uid: string,
+  transactionId: string,
+  categoryId: string,
+): Promise<void> {
+  await updateDoc(transactionDoc(uid, transactionId), { categoryId, categorySource: 'manual' })
+}
+
+// writeBatch aceita até 500 operações — folga pra não encostar no limite.
+const BATCH_SIZE = 400
+
+async function batchUpdate(
+  uid: string,
+  updates: { id: string; data: { categoryId?: string; categorySource?: 'manual'; tags?: string[] } }[],
+): Promise<void> {
+  for (let i = 0; i < updates.length; i += BATCH_SIZE) {
+    const batch = writeBatch(db)
+    for (const { id, data } of updates.slice(i, i + BATCH_SIZE)) batch.update(transactionDoc(uid, id), data)
+    await batch.commit()
+  }
+}
+
+// Mesma troca de updateTransactionCategory, pra vários de uma vez (ações
+// em massa do extrato). Também não mexe em saldo.
+export async function updateTransactionsCategory(
+  uid: string,
+  transactionIds: string[],
+  categoryId: string,
+): Promise<void> {
+  await batchUpdate(
+    uid,
+    transactionIds.map((id) => ({ id, data: { categoryId, categorySource: 'manual' } })),
+  )
+}
+
+// Acrescenta uma tag (já normalizada) a vários lançamentos — quem já tem a
+// tag ou já está no limite de tags fica como está. Retorna quantos mudaram.
+export async function addTagToTransactions(
+  uid: string,
+  transactions: Pick<Transaction, 'id' | 'tags'>[],
+  tag: string,
+  maxTags: number,
+): Promise<number> {
+  const updates = transactions
+    .filter((t) => !(t.tags ?? []).includes(tag) && (t.tags ?? []).length < maxTags)
+    .map((t) => ({ id: t.id, data: { tags: [...(t.tags ?? []), tag] } }))
+  await batchUpdate(uid, updates)
+  return updates.length
+}
+
+// Pago/pendente em massa — passa por updateTransaction (um por vez, mesmo
+// motivo de deleteManyTransactions abaixo) porque mexe no saldo da conta.
+// Só lançamento de conta: no cartão quem paga é a fatura.
+export async function setTransactionsPaid(
+  uid: string,
+  transactions: Transaction[],
+  paid: boolean,
+): Promise<number> {
+  const targets = transactions.filter((t) => t.accountId !== undefined && t.paid !== paid)
+  for (const { id, ...data } of targets) {
+    await updateTransaction(uid, id, { ...data, paid })
+  }
+  return targets.length
 }
 
 export async function deleteTransaction(uid: string, transactionId: string): Promise<void> {

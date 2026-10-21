@@ -4,6 +4,7 @@ import { ptBR } from 'date-fns/locale'
 import { TransactionCompactCard } from './TransactionCompactCard'
 import { CardInvoiceRowCard } from '../cards/CardInvoiceRowCard'
 import { groupCardTransactionsByInvoice, type CardInvoiceGroup } from '../cards/invoiceUtils'
+import { ListChecks } from 'lucide-react'
 import { cn, formatBRL } from '../../lib/utils'
 import type { Transaction } from './types'
 import type { Category } from '../categories/types'
@@ -11,6 +12,9 @@ import type { Account } from '../accounts/types'
 import type { CreditCard } from '../cards/types'
 import { useBulkPay, invoiceKey } from './useBulkPay'
 import { BulkPayBar } from './BulkPayBar'
+import { useTransactionSelection } from './useTransactionSelection'
+import { SelectionActionsBar } from './SelectionActionsBar'
+import { collectTags } from './tags'
 import { MoneyMovementRowCard } from './MoneyMovementRowCard'
 import { FilterStatCards, type FilterStat } from './FilterStatCards'
 import type { MoneyMovementRow } from '../categories/moneyMovements'
@@ -173,6 +177,10 @@ export function TransactionsGrid({
     visibleInvoices,
     resetKey: `${selectedMonth}|${filter}`,
   })
+  // Segurar uma linha (ou "Selecionar") entra no modo seleção, com as ações
+  // em massa; fora dele continua o checkbox de "Pagar selecionados".
+  const selection = useTransactionSelection(visibleTransactions, `${selectedMonth}|${filter}|${pendingOnly}`)
+  const knownTags = useMemo(() => collectTags(transactions), [transactions])
 
   const resultado = totalIncomes - totalExpenses
   // guardado menos resgatado no mês
@@ -196,7 +204,16 @@ export function TransactionsGrid({
 
   return (
     <div className="flex flex-col gap-4">
-      <BulkPayBar bulk={bulk} accounts={accounts} />
+      {selection.active ? (
+        <SelectionActionsBar
+          workspaceId={workspaceId}
+          selection={selection}
+          categories={categories}
+          knownTags={knownTags}
+        />
+      ) : (
+        <BulkPayBar bulk={bulk} accounts={accounts} />
+      )}
 
       {pendingOnly ? null : (
         <FilterStatCards stats={stats} selected={filter} onSelect={setFilter} />
@@ -217,6 +234,16 @@ export function TransactionsGrid({
           >
             Só pendentes
           </button>
+          {selection.active || visibleTransactions.length === 0 ? null : (
+            <button
+              type="button"
+              onClick={() => selection.start()}
+              className="ml-auto flex shrink-0 items-center gap-1.5 text-xs text-light-secondary transition-colors duration-200 hover:text-light-primary dark:text-dark-secondary dark:hover:text-dark-primary"
+            >
+              <ListChecks size={14} />
+              Selecionar
+            </button>
+          )}
         </div>
       )}
 
@@ -263,8 +290,8 @@ export function TransactionsGrid({
                   ) : row.kind === 'invoice' ? (
                     <CardInvoiceRowCard
                       group={row.group}
-                      selected={bulk.selectedInvoiceKeys.has(row.key)}
-                      onToggleSelect={() => bulk.toggleInvoice(row.key)}
+                      selected={!selection.active && bulk.selectedInvoiceKeys.has(row.key)}
+                      onToggleSelect={selection.active ? undefined : () => bulk.toggleInvoice(row.key)}
                       highlighted={highlightKey === row.key}
                     />
                   ) : (
@@ -274,8 +301,16 @@ export function TransactionsGrid({
                       transaction={row.transaction}
                       category={categoriesById.get(row.transaction.categoryId)}
                       linkedName={accountsById.get(row.transaction.accountId ?? '')?.name}
-                      selected={bulk.selectedIds.has(row.key)}
-                      onToggleSelect={() => bulk.toggle(row.key)}
+                      selectMode={selection.active}
+                      selected={
+                        selection.active ? selection.selectedIds.has(row.key) : bulk.selectedIds.has(row.key)
+                      }
+                      onToggleSelect={() => (selection.active ? selection.toggle(row.key) : bulk.toggle(row.key))}
+                      onLongPress={() => {
+                        bulk.clear()
+                        selection.start(row.key)
+                      }}
+                      categories={categories}
                       onConfirm={() => void bulk.confirmOne(row.transaction)}
                       confirming={bulk.confirmingIds.has(row.key)}
                       showDate={false}

@@ -2,14 +2,16 @@ import { useMemo, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
-import { ArrowLeft, ChevronLeft, ChevronRight, ListChecks, Receipt, Settings, X } from 'lucide-react'
+import { ArrowLeft, ChevronLeft, ChevronRight, ListChecks, Receipt, Settings } from 'lucide-react'
 import { useAuthStore } from '../../stores/authStore'
 import { useWorkspaceStore } from '../../stores/workspaceStore'
 import { useCards } from './useCards'
 import { useTransactions } from '../transactions/useTransactions'
 import { useCategories } from '../categories/useCategories'
-import { deleteManyTransactions } from '../transactions/api'
 import { TransactionCompactCard } from '../transactions/TransactionCompactCard'
+import { SelectionActionsBar } from '../transactions/SelectionActionsBar'
+import { useTransactionSelection } from '../transactions/useTransactionSelection'
+import { collectTags } from '../transactions/tags'
 import {
   getDueDate,
   getInvoicePeriod,
@@ -42,10 +44,6 @@ export function CardInvoicePage() {
   // navegando normalmente a partir daqui.
   const [periodOffset, setPeriodOffset] = useState(() => Number(searchParams.get('offset')) || 0)
   const [menuOpen, setMenuOpen] = useState(false)
-  const [selectMode, setSelectMode] = useState(false)
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
-  const [deleting, setDeleting] = useState(false)
-  const [deleteError, setDeleteError] = useState<string | null>(null)
 
   const card = cards.find((c) => c.id === cardId)
   const categoriesById = useMemo(() => new Map(categories.map((c) => [c.id, c])), [categories])
@@ -66,35 +64,10 @@ export function CardInvoicePage() {
   const owed = useMemo(() => sumUnpaid(periodTransactions), [periodTransactions])
   const dueDate = card && period ? getDueDate(period.end, card.dueDay) : null
 
-  function toggleSelectMode() {
-    setSelectMode((mode) => !mode)
-    setSelectedIds(new Set())
-    setDeleteError(null)
-  }
-
-  function toggleSelected(id: string) {
-    setSelectedIds((current) => {
-      const next = new Set(current)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
-  }
-
-  async function handleDeleteSelected() {
-    if (!workspaceId || selectedIds.size === 0) return
-    setDeleting(true)
-    setDeleteError(null)
-    try {
-      await deleteManyTransactions(workspaceId, Array.from(selectedIds))
-      setSelectMode(false)
-      setSelectedIds(new Set())
-    } catch {
-      setDeleteError('Não foi possível apagar tudo. O que já foi apagado continua apagado — tente de novo.')
-    } finally {
-      setDeleting(false)
-    }
-  }
+  // Segurar uma compra (ou "Selecionar") entra no modo seleção, com as
+  // ações em massa — sem Pago/Pendente: no cartão quem paga é a fatura.
+  const selection = useTransactionSelection(periodTransactions, String(periodOffset))
+  const knownTags = useMemo(() => collectTags(transactions), [transactions])
 
   if (!user || !workspaceId) return null
 
@@ -227,16 +200,26 @@ export function CardInvoicePage() {
             </div>
           ) : (
             <>
-              <div className="flex items-center justify-end">
-                <button
-                  type="button"
-                  onClick={toggleSelectMode}
-                  className="flex items-center gap-1.5 text-xs text-light-secondary transition-colors duration-200 hover:text-light-primary dark:text-dark-secondary dark:hover:text-dark-primary"
-                >
-                  {selectMode ? <X size={14} /> : <ListChecks size={14} />}
-                  {selectMode ? 'Cancelar seleção' : 'Selecionar'}
-                </button>
-              </div>
+              {selection.active ? (
+                <SelectionActionsBar
+                  workspaceId={workspaceId}
+                  selection={selection}
+                  categories={categories}
+                  knownTags={knownTags}
+                  allowPayment={false}
+                />
+              ) : (
+                <div className="flex items-center justify-end">
+                  <button
+                    type="button"
+                    onClick={() => selection.start()}
+                    className="flex items-center gap-1.5 text-xs text-light-secondary transition-colors duration-200 hover:text-light-primary dark:text-dark-secondary dark:hover:text-dark-primary"
+                  >
+                    <ListChecks size={14} />
+                    Selecionar
+                  </button>
+                </div>
+              )}
 
               <div className="rounded-2xl border border-border-light bg-surface-light divide-y divide-border-light overflow-hidden dark:border-transparent dark:bg-surface-dark-elevated dark:divide-border-dark">
                 {periodTransactions.map((transaction) => (
@@ -245,26 +228,15 @@ export function CardInvoicePage() {
                     transaction={transaction}
                     category={categoriesById.get(transaction.categoryId)}
                     linkedName={undefined}
-                    selectMode={selectMode}
-                    selected={selectedIds.has(transaction.id)}
-                    onToggleSelect={() => toggleSelected(transaction.id)}
+                    selectMode={selection.active}
+                    selected={selection.selectedIds.has(transaction.id)}
+                    onToggleSelect={() => selection.toggle(transaction.id)}
+                    onLongPress={() => selection.start(transaction.id)}
+                    categories={categories}
                   />
                 ))}
               </div>
 
-              {selectMode ? (
-                <div className="flex flex-col gap-2 rounded-2xl border border-border-light bg-surface-light p-3 dark:border-border-dark dark:bg-surface-dark-elevated">
-                  {deleteError ? <p className="text-sm text-danger">{deleteError}</p> : null}
-                  <Button
-                    type="button"
-                    className="w-full bg-danger hover:bg-danger hover:shadow-none"
-                    disabled={selectedIds.size === 0 || deleting}
-                    onClick={handleDeleteSelected}
-                  >
-                    {deleting ? 'Apagando...' : `Apagar ${selectedIds.size} selecionado(s)`}
-                  </Button>
-                </div>
-              ) : null}
             </>
           )}
         </>
