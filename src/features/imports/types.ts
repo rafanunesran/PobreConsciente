@@ -31,6 +31,7 @@ export interface ReviewedEntry extends ParsedEntry {
   // do documento, pra reimportar o mesmo lançamento ser idempotente.
   docId?: string
   tags?: string[]
+  categorySource?: 'auto' | 'manual' // ver Transaction.categorySource
 }
 
 export type ImportTarget = { accountId: string } | { cardId: string }

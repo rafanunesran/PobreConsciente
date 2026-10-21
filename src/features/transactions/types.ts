@@ -25,6 +25,13 @@ export interface Transaction {
   // bancária — guarda o id do documento que o banco teria gerado, pra
   // sincronização não importar de novo. Ver openFinance/reconcile.ts.
   bankRef?: string
+  // De onde veio a categoria: 'auto' = palpite da conexão bancária que
+  // ninguém confirmou; 'manual' = a pessoa escolheu/trocou. Ausente =
+  // lançamento antigo: conta como 'auto' se veio do banco (id pluggy_),
+  // 'manual' se não (ver isAutoCategory). Palpite pesa menos no histórico que
+  // sugere categorias (imports/categorize.ts) e é refinado sozinho quando
+  // o histórico melhora.
+  categorySource?: 'auto' | 'manual'
   tags?: string[] // marcadores livres (ex: "viagem", "reforma"), já normalizados — ver tags.ts
   createdBy: string // uid de quem criou — nunca alterado em updates
 }

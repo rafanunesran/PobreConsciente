@@ -54,6 +54,7 @@ export async function importTransactions(
         paid: accountId !== undefined,
         createdBy,
         ...(entry.tags && entry.tags.length > 0 ? { tags: entry.tags } : {}),
+        ...(entry.categorySource ? { categorySource: entry.categorySource } : {}),
         ...(entry.installmentIndex !== undefined
           ? { installmentIndex: entry.installmentIndex, installmentTotal: entry.installmentTotal }
           : {}),

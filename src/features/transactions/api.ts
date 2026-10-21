@@ -8,6 +8,7 @@ import {
 } from 'firebase/firestore'
 import { db } from '../../lib/firebase'
 import { accountDoc } from '../accounts/api'
+import { isAutoCategory } from './categorySource'
 import { TRANSACTION_TYPES, type Transaction, type TransactionFormData, type TransactionType } from './types'
 
 // NOTE: mesmo padrão de narrowing campo a campo de accounts/api.ts e
@@ -32,6 +33,7 @@ const transactionConverter: FirestoreDataConverter<Transaction> = {
         : {}),
       ...(t.paidTransactionIds !== undefined ? { paidTransactionIds: t.paidTransactionIds } : {}),
       ...(t.bankRef !== undefined ? { bankRef: t.bankRef } : {}),
+      ...(t.categorySource !== undefined ? { categorySource: t.categorySource } : {}),
       ...(Array.isArray(t.tags) && t.tags.length > 0 ? { tags: t.tags } : {}),
     }
     return t.accountId !== undefined ? { ...base, accountId: t.accountId } : { ...base, cardId: t.cardId }
@@ -73,6 +75,9 @@ const transactionConverter: FirestoreDataConverter<Transaction> = {
         : {}),
       ...(paidTransactionIds !== undefined ? { paidTransactionIds } : {}),
       ...(typeof data.bankRef === 'string' && data.bankRef !== '' ? { bankRef: data.bankRef } : {}),
+      ...(data.categorySource === 'auto' || data.categorySource === 'manual'
+        ? { categorySource: data.categorySource }
+        : {}),
       ...(tags.length > 0 ? { tags } : {}),
     }
   },
@@ -262,6 +267,13 @@ export async function updateTransaction(
       // vínculo com o lançamento do banco também não vem do form — sem
       // preservar, a próxima sincronização importaria o mesmo gasto de novo.
       ...(oldData.bankRef !== undefined ? { bankRef: oldData.bankRef } : {}),
+      // palpite automático só continua palpite se a categoria não mudou —
+      // trocou a categoria, virou escolha da pessoa
+      ...(isAutoCategory(oldData)
+        ? { categorySource: data.categoryId === oldData.categoryId ? 'auto' : 'manual' }
+        : oldData.categorySource !== undefined
+          ? { categorySource: oldData.categorySource }
+          : {}),
       // Quem não conhece tags (confirmar pendente, pagamento de fatura...)
       // não manda o campo — preserva o que já estava gravado.
       tags: data.tags ?? oldData.tags,

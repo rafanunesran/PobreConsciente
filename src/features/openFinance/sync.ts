@@ -9,7 +9,8 @@ import type { CreditCard } from '../cards/types'
 import { cardsCollection } from '../cards/api'
 import { todayDateString } from '../cards/invoiceUtils'
 import { categoriesCollection } from '../categories/api'
-import { buildCategorySuggester } from '../imports/categorize'
+import { buildCategorySuggester, buildDetailedCategorySuggester } from '../imports/categorize'
+import { isAutoCategory } from '../transactions/categorySource'
 import { importTransactions } from '../imports/api'
 import type { ParsedEntry, ReviewedEntry } from '../imports/types'
 import { transactionDoc, transactionsCollection } from '../transactions/api'
@@ -537,7 +538,7 @@ async function processLink(ctx: SyncContext, f: FetchedLink, transferKeys: Set<s
   for (const entry of toImport) {
     const categoryId = ctx.suggest(entry.description, entry.type) ?? ctx.firstCategory[entry.type]
     if (!categoryId) continue
-    reviewed.push({ ...entry, categoryId, tags: [BANK_SYNC_TAG] })
+    reviewed.push({ ...entry, categoryId, tags: [BANK_SYNC_TAG], categorySource: 'auto' })
   }
 
   await importTransactions(ctx.workspaceId, reviewed, link, ctx.createdBy)
@@ -562,11 +563,38 @@ async function processLink(ctx: SyncContext, f: FetchedLink, transferKeys: Set<s
       description: entry.description,
       categoryId: entry.categoryId,
       paid: targetKind === 'account',
+      categorySource: 'auto',
       createdBy: ctx.createdBy,
       ...link,
     })
   }
   return imported
+}
+
+// Palpites de categoria (lançamentos do banco que ninguém corrigiu) são
+// refeitos com base no que a pessoa categorizou à mão: se agora existe
+// lançamento manual igual ou parecido com outra categoria, o palpite segue
+// a escolha da pessoa. Continua marcado como palpite — só vira "manual"
+// quando a pessoa mesma trocar.
+async function refineAutoCategories(ctx: SyncContext): Promise<number> {
+  const suggest = buildDetailedCategorySuggester(ctx.transactions, { manualOnly: true })
+  const changes: { transaction: Transaction; categoryId: string }[] = []
+  for (const t of ctx.transactions) {
+    if (!isAutoCategory(t)) continue
+    const suggestion = suggest(t.description, t.type)
+    if (!suggestion || suggestion.confidence === 'fallback' || suggestion.categoryId === t.categoryId)
+      continue
+    changes.push({ transaction: t, categoryId: suggestion.categoryId })
+  }
+  for (let start = 0; start < changes.length; start += 450) {
+    const batch = writeBatch(db)
+    for (const { transaction, categoryId } of changes.slice(start, start + 450)) {
+      batch.update(transactionDoc(ctx.workspaceId, transaction.id), { categoryId, categorySource: 'auto' })
+      transaction.categoryId = categoryId
+    }
+    await batch.commit()
+  }
+  return changes.length
 }
 
 // Nome completo (e o nome de exibição, se tiver nome e sobrenome) de cada
@@ -737,6 +765,12 @@ async function runSync(
       at: startedAt,
       ...(error ? { error } : {}),
     }).catch(() => undefined)
+  }
+
+  try {
+    await refineAutoCategories(ctx)
+  } catch (err) {
+    errors.push(err instanceof Error ? err.message : 'Falha ao refinar categorias.')
   }
 
   // Por último: o saldo de cada conta vinculada passa a ser o que o banco
