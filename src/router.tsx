@@ -174,6 +174,13 @@ export const router = createBrowserRouter(
           },
         },
         {
+          path: 'contas/:accountId/caixinhas/:caixinhaId/juntar',
+          lazy: async () => {
+            const { CaixinhaMergePage } = await import('./features/caixinhas/CaixinhaMergePage')
+            return { Component: CaixinhaMergePage }
+          },
+        },
+        {
           path: 'contas/:accountId/caixinhas/:caixinhaId/ajustar',
           lazy: async () => {
             const { CaixinhaAdjustPage } = await import('./features/caixinhas/CaixinhaAdjustPage')

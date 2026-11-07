@@ -3,6 +3,7 @@ import { db } from '../../lib/firebase'
 import { caixinhasCollection } from '../caixinhas/api'
 import { caixinhaMovementDoc, caixinhaMovementsCollection } from '../caixinhas/movements'
 import type { Caixinha, CaixinhaMovement } from '../caixinhas/types'
+import { mergeCaixinhas, movementBaseId } from '../caixinhas/merge'
 import { accountDoc } from '../accounts/api'
 import { transactionDoc, transactionsCollection } from '../transactions/api'
 import type { Transaction } from '../transactions/types'
@@ -38,6 +39,9 @@ function findCaixinha(
   const marked = caixinhaId !== undefined ? sameAccount.find((c) => c.id === caixinhaId) : undefined
   if (marked) return { caixinha: marked, nameToCreate: marked.name }
   if (!name) {
+    // a que já está ligada às aplicações sem nome do banco
+    const bankReserve = sameAccount.find((c) => isGenericBankRef(c.bankRef))
+    if (bankReserve) return { caixinha: bankReserve, nameToCreate: bankReserve.name }
     if (sameAccount.length === 1) return { caixinha: sameAccount[0], nameToCreate: DEFAULT_CAIXINHA_NAME }
     const fallback = sameAccount.find((c) => normalizeName(c.name) === normalizeName(DEFAULT_CAIXINHA_NAME))
     return { caixinha: fallback, nameToCreate: DEFAULT_CAIXINHA_NAME }
@@ -94,7 +98,8 @@ export async function applyBankReserves(
   ])
   const caixinhas = caixinhasSnap.docs.map((d) => d.data())
   const movements = movementsSnap.docs.map((d) => d.data())
-  const appliedIds = new Set(movements.map((m) => m.id))
+  // sem o sufixo de "movido de caixinha" (caixinhas/merge.ts)
+  const appliedIds = new Set(movements.map((m) => movementBaseId(m.id)))
   // movimentos feitos pelo app (não vindos do banco) que ainda podem ser
   // reconhecidos como o mesmo de um lançamento do banco
   const claimable = movements.filter(
@@ -208,17 +213,67 @@ const INVESTMENT_NAME_NOISE = new Set([
   'cdb',
   'lci',
   'lca',
+  'lc',
   'liquidez',
   'diaria',
+  'diario',
+  'cdi',
+  'ipca',
+  'pre',
+  'pos',
+  'fixado',
+  'prefixado',
+  'posfixado',
+  'renda',
+  'fixa',
+  'venc',
+  'vencimento',
+  'emissao',
+  'aplicacao',
+  'resgate',
+  'investimento',
+  'de',
+  'do',
+  'da',
+  'em',
+  'e',
+  'com',
+])
+// Nome do investimento com o nome da instituição ("RDB Nu Financeira",
+// "CDB NU PAGAMENTOS S.A.") é o nome do produto, não o de uma caixinha:
+// pelo Open Finance o Nubank manda cada aplicação como um investimento
+// separado, todos com esse nome de produto e sem o nome da caixinha.
+const INSTITUTION_WORDS = new Set([
+  'nu',
+  'nubank',
+  'financeira',
+  'banco',
+  'pagamentos',
+  'instituicao',
+  'scfi',
+  'sa',
+  'ltda',
+  'corretora',
 ])
 
-function investmentCaixinhaName(investment: PluggyInvestment): string {
-  const words = investment.name
-    .replace(/\s+/g, ' ')
+function cleanWord(word: string): string {
+  return normalizeName(word).replace(/[^a-z0-9]/g, '')
+}
+
+// Nome de caixinha que o nome do investimento traz; '' = nenhum (só
+// produto, taxa, vencimento...).
+export function investmentCaixinhaName(investmentName: string): string {
+  const words = investmentName.replace(/\s+/g, ' ').trim().split(/[\s—–\-:|/()]+/).filter(Boolean)
+  if (words.some((w) => INSTITUTION_WORDS.has(cleanWord(w)))) return ''
+  return words
+    .filter((w) => {
+      const c = cleanWord(w)
+      // número/taxa/data ("110%", "2028", "15/01/2028") não é nome
+      return c !== '' && !/\d/.test(c) && !INVESTMENT_NAME_NOISE.has(c)
+    })
+    .join(' ')
     .trim()
-    .split(' ')
-    .filter((w) => !INVESTMENT_NAME_NOISE.has(normalizeName(w).replace(/[^a-z0-9]/g, '')))
-  return words.join(' ').trim().slice(0, CAIXINHA_NAME_MAX)
+    .slice(0, CAIXINHA_NAME_MAX)
 }
 
 export interface InvestmentItem {
@@ -226,56 +281,161 @@ export interface InvestmentItem {
   accountId: string // conta do app do mesmo banco
 }
 
+// Investimentos que são a mesma caixinha. Renda fixa com o mesmo nome de
+// caixinha (ou sem nome nenhum) do mesmo banco é uma caixinha só, com a
+// soma dos saldos — cada "Dinheiro guardado" no Nubank vira uma aplicação
+// (RDB) nova, e antes cada uma virava uma caixinha. Ação, fundo... ficam
+// cada um por si e só se ligam a uma caixinha que já exista com o nome.
+interface InvestmentGroup {
+  // vai em Caixinha.bankRef
+  key: string
+  accountId: string
+  name: string // '' = sem nome (a "Reserva" da conta)
+  balance: number
+  ids: Set<string>
+  // nomes (normalizados) que o banco deu aos investimentos do grupo
+  rawNames: Set<string>
+  // pode criar caixinha nova: renda fixa com saldo
+  creatable: boolean
+}
+
+const GENERIC_GROUP_SUFFIX = ':*'
+
+export function isGenericBankRef(bankRef: string | undefined): boolean {
+  return bankRef !== undefined && bankRef.startsWith('inv:') && bankRef.endsWith(GENERIC_GROUP_SUFFIX)
+}
+
+function groupInvestments(items: InvestmentItem[]): InvestmentGroup[] {
+  const groups = new Map<string, InvestmentGroup>()
+  for (const { investment, accountId } of items) {
+    const fixedIncome = investment.type === 'FIXED_INCOME'
+    const name = investmentCaixinhaName(investment.name)
+    if (!fixedIncome && !name) continue
+    const key = fixedIncome
+      ? `inv:${investment.itemId}:${name ? normalizeName(name) : '*'}`
+      : investment.id
+    const active = investment.status !== 'TOTAL_WITHDRAWAL'
+    let group = groups.get(key)
+    if (!group) {
+      group = { key, accountId, name, balance: 0, ids: new Set(), rawNames: new Set(), creatable: false }
+      groups.set(key, group)
+    }
+    group.ids.add(investment.id)
+    group.rawNames.add(normalizeName(investment.name))
+    if (active) {
+      group.balance += investment.balance
+      if (fixedIncome && investment.balance > 0) group.creatable = true
+    }
+  }
+  for (const g of groups.values()) g.balance = Math.round(g.balance * 100) / 100
+  // com nome primeiro: a "Reserva" sem nome fica com o que sobra
+  return [...groups.values()].sort((a, b) => Number(a.name === '') - Number(b.name === ''))
+}
+
 // O saldo de cada caixinha passa a ser o do investimento correspondente no
 // banco (caixinha/reserva aparece no Open Finance como renda fixa). A
-// caixinha fica vinculada ao investimento (bankRef); sem vínculo ainda,
-// procura pelo nome e, se for renda fixa, cria. Diferença entre o saldo do
-// app e o do banco (rendimento, movimento que o app não viu) fica no
-// histórico como "Ajuste de saldo".
+// caixinha fica vinculada ao grupo de investimentos (bankRef); sem vínculo
+// ainda, procura pelo nome e, se for renda fixa, cria.
+// Caixinhas que versões antigas criaram uma por aplicação (bankRef = id do
+// investimento) são juntadas na do grupo, com histórico e saldo.
+// Diferença entre o saldo do app e o do banco (rendimento, movimento que o
+// app não viu, aplicação contada duas vezes) fica no histórico como
+// "Ajuste de saldo".
 export async function alignCaixinhasWithInvestments(
   workspaceId: string,
   items: InvestmentItem[],
   createdBy: string,
 ): Promise<number> {
   if (items.length === 0) return 0
-  const caixinhas = (await getDocs(caixinhasCollection(workspaceId))).docs.map((d) => d.data())
+  const [caixinhasSnap, movementsSnap] = await Promise.all([
+    getDocs(caixinhasCollection(workspaceId)),
+    getDocs(caixinhaMovementsCollection(workspaceId)),
+  ])
+  let caixinhas = caixinhasSnap.docs.map((d) => d.data())
+  const movements = movementsSnap.docs.map((d) => d.data())
+  const reportedIds = new Set(items.map((i) => i.investment.id))
   const today = todayDateString()
-  const batch = writeBatch(db)
-  let aligned = 0
+  const linked = new Set<string>() // caixinhas já ligadas a um grupo nesta rodada
+  const pending: { caixinha: Caixinha; group: InvestmentGroup; created: boolean }[] = []
 
-  for (const { investment, accountId } of items) {
-    if (investment.status === 'TOTAL_WITHDRAWAL') continue
-    const name = investmentCaixinhaName(investment)
-    let caixinha =
-      caixinhas.find((c) => c.bankRef === investment.id) ??
-      (name
-        ? findCaixinha(
-            caixinhas.filter((c) => c.bankRef === undefined),
-            accountId,
-            name,
-          ).caixinha
-        : undefined)
+  for (const group of groupInvestments(items)) {
+    const generic = group.name === ''
+    const sameAccount = caixinhas.filter((c) => c.accountId === group.accountId && !linked.has(c.id))
+    const byKey = sameAccount.find((c) => c.bankRef === group.key)
+    const legacy = sameAccount.filter((c) => c.bankRef !== undefined && group.ids.has(c.bankRef))
+    // aplicação que já foi toda resgatada e o banco nem lista mais: a
+    // caixinha que tinha sido criada pra ela também é desse grupo
+    const stale = generic
+      ? sameAccount.filter(
+          (c) =>
+            c.bankRef !== undefined &&
+            !c.bankRef.startsWith('inv:') &&
+            !reportedIds.has(c.bankRef) &&
+            (investmentCaixinhaName(c.name) === '' || group.rawNames.has(normalizeName(c.name))),
+        )
+      : []
+    const free = sameAccount.filter((c) => c.bankRef === undefined)
+    const reservaByName = free.find((c) => normalizeName(c.name) === normalizeName(DEFAULT_CAIXINHA_NAME))
+    let caixinha = generic
+      ? (byKey ?? reservaByName ?? legacy[0] ?? stale[0] ?? findCaixinha(free, group.accountId, undefined).caixinha)
+      : (byKey ?? legacy[0] ?? findCaixinha(free, group.accountId, group.name).caixinha)
+
+    let created = false
     if (!caixinha) {
-      // só renda fixa vira caixinha nova (ação, fundo... não são reserva)
-      if (investment.type !== 'FIXED_INCOME' || investment.balance <= 0) continue
+      if (!group.creatable) continue
       const ref = doc(caixinhasCollection(workspaceId))
       caixinha = {
         id: ref.id,
-        accountId,
-        name: name || investment.name.slice(0, CAIXINHA_NAME_MAX) || DEFAULT_CAIXINHA_NAME,
+        accountId: group.accountId,
+        name: group.name || DEFAULT_CAIXINHA_NAME,
         balance: 0,
         createdBy,
       }
-      batch.set(ref, caixinha)
       caixinhas.push(caixinha)
+      created = true
     }
 
-    const bankBalance = Math.round(investment.balance * 100) / 100
+    const target = caixinha
+    const duplicates = [byKey, ...legacy, ...stale].filter(
+      (c, i, all): c is Caixinha => c !== undefined && c.id !== target.id && all.indexOf(c) === i,
+    )
+    if (duplicates.length > 0) {
+      await mergeCaixinhas(workspaceId, target, duplicates, movements)
+      const gone = new Set(duplicates.map((c) => c.id))
+      caixinhas = caixinhas.filter((c) => !gone.has(c.id))
+    }
+    linked.add(target.id)
+    pending.push({ caixinha: target, group, created })
+  }
+
+  const batch = writeBatch(db)
+  let aligned = 0
+  for (const { caixinha, group, created } of pending) {
+    let bankBalance = group.balance
+    if (group.name === '') {
+      // Sem nome, o banco só diz o total guardado na conta: o que já está
+      // nas outras caixinhas dessa conta (marcadas pela pessoa, com nome)
+      // sai dele — o resto é desta.
+      // (as ligadas a um investimento com nome já têm o saldo delas à parte)
+      const others = caixinhas.filter(
+        (c) => c.accountId === caixinha.accountId && c.id !== caixinha.id && !linked.has(c.id),
+      )
+      bankBalance = Math.round((group.balance - others.reduce((sum, c) => sum + c.balance, 0)) * 100) / 100
+    }
+    const ref = doc(caixinhasCollection(workspaceId), caixinha.id)
+    if (bankBalance < 0) {
+      // as outras já passam do total do banco — não inventa saldo negativo
+      if (created) continue
+      batch.update(ref, { bankRef: group.key })
+      caixinha.bankRef = group.key
+      continue
+    }
     const diff = Math.round((bankBalance - caixinha.balance) * 100) / 100
-    batch.update(doc(caixinhasCollection(workspaceId), caixinha.id), {
-      balance: bankBalance,
-      bankRef: investment.id,
-    })
+    if (created) {
+      batch.set(ref, { ...caixinha, balance: bankBalance, bankRef: group.key })
+    } else {
+      batch.update(ref, { balance: bankBalance, bankRef: group.key })
+    }
     if (Math.abs(diff) >= 0.01) {
       const movementRef = doc(caixinhaMovementsCollection(workspaceId))
       batch.set(movementRef, {
@@ -288,7 +448,7 @@ export async function alignCaixinhasWithInvestments(
       })
     }
     caixinha.balance = bankBalance
-    caixinha.bankRef = investment.id
+    caixinha.bankRef = group.key
     aligned++
   }
   await batch.commit()

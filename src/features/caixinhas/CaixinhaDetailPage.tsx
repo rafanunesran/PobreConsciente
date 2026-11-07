@@ -125,6 +125,15 @@ export function CaixinhaDetailPage() {
                   >
                     Ajuste de saldo
                   </Link>
+                  {caixinhas.length > 1 ? (
+                    <Link
+                      to={`${base}/juntar`}
+                      onClick={() => setMenuOpen(false)}
+                      className="px-4 py-2.5 text-left text-sm text-light-primary transition-colors duration-200 hover:bg-border-light dark:text-dark-primary dark:hover:bg-border-dark"
+                    >
+                      Juntar com outras
+                    </Link>
+                  ) : null}
                   <Link
                     to={`${base}/editar`}
                     onClick={() => setMenuOpen(false)}
