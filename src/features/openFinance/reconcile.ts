@@ -89,7 +89,7 @@ export async function mergeImportedDuplicates(
           balance: increment(-movement.amount),
         })
         batch.delete(caixinhaMovementDoc(workspaceId, movement.id))
-        movementsById.delete(movement.id)
+        movementsById.delete(`bank_${imported.id}`)
       }
 
       const update = linkUpdates(manual, bank, accountId !== undefined)

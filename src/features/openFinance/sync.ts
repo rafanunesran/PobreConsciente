@@ -4,6 +4,7 @@ import { db } from '../../lib/firebase'
 import { accountDoc, accountsCollection } from '../accounts/api'
 import { type AccountTransferLog, listTransferLogIds, saveTransferLogs } from '../accounts/transferLog'
 import { caixinhaMovementsCollection } from '../caixinhas/movements'
+import { movementBaseId } from '../caixinhas/merge'
 import type { CaixinhaMovement } from '../caixinhas/types'
 import type { CreditCard } from '../cards/types'
 import { cardsCollection } from '../cards/api'
@@ -636,7 +637,8 @@ async function runSync(
     accountIds: new Set(accountsSnap.docs.map((d) => d.id)),
     cardIds: new Set(cardsSnap.docs.map((d) => d.id)),
     cards: cardsSnap.docs.map((d) => d.data()),
-    movementsById: new Map(movementsSnap.docs.map((d) => [d.id, d.data()])),
+    // chave sem o sufixo de "movido de caixinha" (caixinhas/merge.ts)
+    movementsById: new Map(movementsSnap.docs.map((d) => [movementBaseId(d.id), d.data()])),
     caixinhaRules,
     bankBalances: new Map(),
     transactions,

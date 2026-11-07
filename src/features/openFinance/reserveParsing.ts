@@ -77,8 +77,21 @@ const FILLER = new Set([
   'sua',
   'seu',
 ])
-// Códigos de produto que não são nome de caixinha.
-const PRODUCT_CODES = new Set(['rdb', 'cdb', 'cdi', 'lci', 'lca'])
+// Códigos de produto e nome da instituição ("Aplicação RDB Nu Financeira")
+// que não são nome de caixinha.
+const PRODUCT_CODES = new Set([
+  'rdb',
+  'cdb',
+  'cdi',
+  'lci',
+  'lca',
+  'nu',
+  'nubank',
+  'financeira',
+  'pagamentos',
+  'scfi',
+  'sa',
+])
 
 function fold(text: string): string {
   return text.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
@@ -118,7 +131,9 @@ export function parseReserveMovement(
     if (i === verbIndex) return false
     const w = words[i] as string
     if (i < verbIndex) return false // o que vem antes do verbo ("Dinheiro") não é nome
-    return !FILLER.has(w) && !CONTAINERS.includes(w) && !PRODUCT_CODES.has(w) && w !== ''
+    // número solto (código da operação, "12/10") não é nome — senão cada
+    // aplicação viraria uma caixinha
+    return !FILLER.has(w) && !CONTAINERS.includes(w) && !PRODUCT_CODES.has(w) && /[a-z]/.test(w)
   })
   const name = nameWords.join(' ').trim().slice(0, CAIXINHA_NAME_MAX)
   return name ? { kind, name } : { kind }
