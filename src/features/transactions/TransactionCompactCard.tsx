@@ -1,4 +1,4 @@
-import { useRef, useState, type MouseEvent, type PointerEvent } from 'react'
+import { useRef, useState, type DragEvent, type MouseEvent, type PointerEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
@@ -44,7 +44,27 @@ const LONG_PRESS_MOVE_TOLERANCE = 10
 
 // Segurar sem arrastar (arrastar é rolar a lista). O clique que vem depois
 // de soltar é engolido, senão abriria o form ou desmarcaria a linha que
-// acabou de entrar na seleção.
+// acabou de entrar na seleção. Esse bloqueio fica no document (e não na
+// própria linha) porque ao entrar no modo seleção a linha é trocada por
+// outro elemento e um handler preso nela some antes do clique chegar.
+let suppressClickUntil = 0
+let clickGuardInstalled = false
+
+function installClickGuard() {
+  if (clickGuardInstalled || typeof document === 'undefined') return
+  clickGuardInstalled = true
+  document.addEventListener(
+    'click',
+    (e) => {
+      if (Date.now() > suppressClickUntil) return
+      suppressClickUntil = 0
+      e.preventDefault()
+      e.stopPropagation()
+    },
+    true,
+  )
+}
+
 function useLongPress(onLongPress: (() => void) | undefined) {
   const timer = useRef<number | null>(null)
   const origin = useRef<{ x: number; y: number } | null>(null)
@@ -59,16 +79,23 @@ function useLongPress(onLongPress: (() => void) | undefined) {
   function fire() {
     if (fired.current || !onLongPress) return
     fired.current = true
+    timer.current = null
+    // o clique de quando o dedo sai da tela (o Android às vezes só manda
+    // bem depois, quando o menu de contexto é cancelado)
+    suppressClickUntil = Date.now() + 1500
     navigator.vibrate?.(30)
     onLongPress()
   }
 
   if (!onLongPress) return {}
+  installClickGuard()
 
   return {
     onPointerDown: (e: PointerEvent) => {
       fired.current = false
+      suppressClickUntil = 0
       if (e.button !== 0) return
+      cancel()
       origin.current = { x: e.clientX, y: e.clientY }
       timer.current = window.setTimeout(fire, LONG_PRESS_MS)
     },
@@ -82,18 +109,15 @@ function useLongPress(onLongPress: (() => void) | undefined) {
     onPointerCancel: cancel,
     onPointerLeave: cancel,
     // Android dispara o menu de contexto no toque longo; no computador é o
-    // botão direito — nos dois casos vira "selecionar".
+    // botão direito — nos dois casos vira "selecionar" (se o timer já não
+    // tiver feito isso).
     onContextMenu: (e: MouseEvent) => {
       e.preventDefault()
       cancel()
       fire()
     },
-    onClickCapture: (e: MouseEvent) => {
-      if (!fired.current) return
-      fired.current = false
-      e.preventDefault()
-      e.stopPropagation()
-    },
+    // segurar um link no Android começa a arrastar ele
+    onDragStart: (e: DragEvent) => e.preventDefault(),
   }
 }
 
@@ -121,7 +145,9 @@ export function TransactionCompactCard({
   const quickCategory = !selectMode && categories !== undefined
   const [pickingCategory, setPickingCategory] = useState(false)
   const showToast = useToastStore((state) => state.show)
-  const longPress = useLongPress(selectMode ? undefined : onLongPress)
+  // No modo seleção, segurar outra linha também marca/desmarca (o toque
+  // simples já faz isso); fora dele, entra no modo seleção.
+  const longPress = useLongPress(selectMode ? onToggleSelect : onLongPress)
   const workspaceId = useWorkspaceStore((state) => state.workspaceId)
 
   const subtitle = [
@@ -244,12 +270,21 @@ export function TransactionCompactCard({
     // (inputs não podem ficar dentro de <a>); os controles ficam em z-10.
     row = (
       <div className="relative">
-        <Link to={editPath} aria-label={`Editar ${transaction.description}`} className="absolute inset-0 z-0" />
+        <Link
+          to={editPath}
+          draggable={false}
+          aria-label={`Editar ${transaction.description}`}
+          className="absolute inset-0 z-0"
+        />
         {content}
       </div>
     )
   } else {
-    row = <Link to={editPath}>{content}</Link>
+    row = (
+      <Link to={editPath} draggable={false}>
+        {content}
+      </Link>
+    )
   }
 
   // A janela de categoria fica fora da div do toque longo: evento de portal
@@ -258,7 +293,7 @@ export function TransactionCompactCard({
     <>
       <div
         {...longPress}
-        className={onLongPress && !selectMode ? 'select-none [-webkit-touch-callout:none]' : undefined}
+        className={onLongPress || selectMode ? 'select-none [-webkit-touch-callout:none]' : undefined}
       >
         {row}
       </div>
