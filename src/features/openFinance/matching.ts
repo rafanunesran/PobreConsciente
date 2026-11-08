@@ -84,11 +84,30 @@ export function isManualCandidate(t: Transaction): boolean {
   return !t.id.startsWith('pluggy_') && t.bankRef === undefined
 }
 
+// Lançamento previsto (pendente: salário, conta de água...) é estimativa —
+// o valor real que o banco traz pode variar até esta fração pra cima ou
+// pra baixo. Só vale com sinal de que é a mesma coisa (recorrência ou
+// palavra em comum); valor exato sempre tem preferência (ver
+// pairBankWithManual).
+export const PLANNED_TOLERANCE = 0.2
+
+function isExactAmount(bank: BankSide, manual: Transaction): boolean {
+  return Math.abs(bank.amount - manual.amount) < AMOUNT_EPSILON
+}
+
+function isPlannedEstimate(bank: BankSide, manual: Transaction): boolean {
+  return (
+    !manual.paid &&
+    (manual.recurringRuleId !== undefined || sharesWord(bank.description, manual.description)) &&
+    Math.abs(bank.amount - manual.amount) <= manual.amount * PLANNED_TOLERANCE
+  )
+}
+
 function isPlausibleMatch(bank: BankSide, manual: Transaction, windowDays: number): boolean {
   if (bank.type !== manual.type) return false
-  if (Math.abs(bank.amount - manual.amount) >= AMOUNT_EPSILON) return false
   const distance = dayDistance(bank.date, manual.date)
   if (distance > windowDays) return false
+  if (!isExactAmount(bank, manual)) return isPlannedEstimate(bank, manual)
   if (distance <= CLOSE_DAYS) return true
   // Mais longe: só se o lançamento do app era algo que se espera ver no
   // banco (conta pendente, recorrência, parcela) ou fala da mesma coisa.
@@ -106,9 +125,10 @@ export interface MatchPair<B extends BankSide> {
   manual: Transaction
 }
 
-// Casa cada lançamento do banco com no máximo um do app (e vice-versa),
-// sempre o par de datas mais próximas primeiro; empate fica com o que
-// estava pendente (é o que o banco "confirma").
+// Casa cada lançamento do banco com no máximo um do app (e vice-versa):
+// valor exato antes de estimativa, depois o par de datas mais próximas,
+// depois o mais perto no valor; empate fica com o que estava pendente (é o
+// que o banco "confirma").
 export function pairBankWithManual<B extends BankSide>(
   bank: B[],
   manual: Transaction[],
@@ -118,6 +138,8 @@ export function pairBankWithManual<B extends BankSide>(
     bankIndex: number
     manualIndex: number
     distance: number
+    exact: boolean
+    amountGap: number
     pending: boolean
   }[] = []
   bank.forEach((b, bankIndex) => {
@@ -127,12 +149,20 @@ export function pairBankWithManual<B extends BankSide>(
           bankIndex,
           manualIndex,
           distance: dayDistance(b.date, m.date),
+          exact: isExactAmount(b, m),
+          amountGap: Math.abs(b.amount - m.amount),
           pending: !m.paid,
         })
       }
     })
   })
-  options.sort((a, b) => a.distance - b.distance || Number(b.pending) - Number(a.pending))
+  options.sort(
+    (a, b) =>
+      Number(b.exact) - Number(a.exact) ||
+      a.distance - b.distance ||
+      a.amountGap - b.amountGap ||
+      Number(b.pending) - Number(a.pending),
+  )
 
   const usedBank = new Set<number>()
   const usedManual = new Set<number>()
