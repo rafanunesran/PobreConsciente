@@ -24,8 +24,7 @@ interface TransactionCompactCardProps {
   selected?: boolean
   onToggleSelect?: () => void
   // Controles de pagamento (extrato/pendentes) — quando presente e o
-  // lançamento ainda está pendente, mostra checkbox de seleção múltipla e
-  // o botão "Pago"/"Recebido".
+  // lançamento ainda está pendente, mostra o botão "Marcar pago"/"Recebido".
   onConfirm?: () => void
   confirming?: boolean
   // Dentro de uma lista já agrupada por dia, a data no subtítulo é redundante.
@@ -166,7 +165,7 @@ export function TransactionCompactCard({
     <div
       className={cn(
         'flex items-center gap-3 px-3 py-3 transition-colors duration-700',
-        selected && (payable || selectMode) && 'bg-brand-500/10',
+        selected && selectMode && 'bg-brand-500/10',
         highlighted && 'bg-brand-500/20',
       )}
     >
@@ -178,15 +177,6 @@ export function TransactionCompactCard({
           onChange={onToggleSelect}
           onClick={(e) => e.stopPropagation()}
           className="h-4 w-4 shrink-0 accent-brand-500"
-        />
-      ) : null}
-      {payable ? (
-        <input
-          type="checkbox"
-          aria-label={`Selecionar ${transaction.description}`}
-          checked={selected ?? false}
-          onChange={onToggleSelect}
-          className="relative z-10 h-4 w-4 shrink-0 accent-brand-500"
         />
       ) : null}
       {quickCategory ? (
@@ -266,8 +256,8 @@ export function TransactionCompactCard({
       </button>
     )
   } else if (payable || quickCategory) {
-    // Com checkbox/botão dentro do card, o link vira uma camada por trás
-    // (inputs não podem ficar dentro de <a>); os controles ficam em z-10.
+    // Com botão dentro do card, o link vira uma camada por trás (botões não
+    // podem ficar dentro de <a>); os controles ficam em z-10.
     row = (
       <div className="relative">
         <Link

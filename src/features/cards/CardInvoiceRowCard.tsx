@@ -12,9 +12,6 @@ function formatDisplayDate(date: string): string {
 
 interface CardInvoiceRowCardProps {
   group: CardInvoiceGroup
-  // Seleção múltipla (extrato/pendentes) — só pra fatura com valor devido.
-  selected?: boolean
-  onToggleSelect?: () => void
   highlighted?: boolean
 }
 
@@ -23,8 +20,8 @@ interface CardInvoiceRowCardProps {
 // groupCardTransactionsByInvoice em invoiceUtils.ts. Clica e vai direto pra
 // fatura correspondente (periodOffset já calculado no grupo). Só faturas
 // com algo em aberto chegam aqui, então o status é sempre "Pendente".
-export function CardInvoiceRowCard({ group, selected, onToggleSelect, highlighted = false }: CardInvoiceRowCardProps) {
-  const payable = onToggleSelect !== undefined && group.unpaidAmount > 0
+export function CardInvoiceRowCard({ group, highlighted = false }: CardInvoiceRowCardProps) {
+  const payable = group.unpaidAmount > 0
 
   return (
     <div className="relative">
@@ -36,19 +33,9 @@ export function CardInvoiceRowCard({ group, selected, onToggleSelect, highlighte
       <div
         className={cn(
           'flex items-center gap-3 px-3 py-3 transition-colors duration-700',
-          selected && payable && 'bg-brand-500/10',
           highlighted && 'bg-brand-500/20',
         )}
       >
-        {payable ? (
-          <input
-            type="checkbox"
-            aria-label={`Selecionar fatura ${group.cardName}`}
-            checked={selected ?? false}
-            onChange={onToggleSelect}
-            className="relative z-10 h-4 w-4 shrink-0 accent-brand-500"
-          />
-        ) : null}
         <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-violet-500/15 text-violet-400">
           <CreditCardIcon size={18} />
         </span>

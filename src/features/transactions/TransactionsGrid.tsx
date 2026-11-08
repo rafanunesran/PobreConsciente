@@ -3,15 +3,14 @@ import { format, isToday, isYesterday } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 import { TransactionCompactCard } from './TransactionCompactCard'
 import { CardInvoiceRowCard } from '../cards/CardInvoiceRowCard'
-import { groupCardTransactionsByInvoice, type CardInvoiceGroup } from '../cards/invoiceUtils'
+import { groupCardTransactionsByInvoice, invoiceKey, type CardInvoiceGroup } from '../cards/invoiceUtils'
 import { ListChecks } from 'lucide-react'
 import { cn, formatBRL } from '../../lib/utils'
 import type { Transaction } from './types'
 import type { Category } from '../categories/types'
 import type { Account } from '../accounts/types'
 import type { CreditCard } from '../cards/types'
-import { useBulkPay, invoiceKey } from './useBulkPay'
-import { BulkPayBar } from './BulkPayBar'
+import { useConfirmPaid } from './useConfirmPaid'
 import { useTransactionSelection } from './useTransactionSelection'
 import { SelectionActionsBar } from './SelectionActionsBar'
 import { collectTags } from './tags'
@@ -65,7 +64,6 @@ export function TransactionsGrid({
 }: TransactionsGridProps) {
   const [filter, setFilter] = useState<TypeFilter>('all')
   const cards = useMemo(() => Array.from(cardsById.values()), [cardsById])
-  const accounts = useMemo(() => Array.from(accountsById.values()), [accountsById])
   const categories = useMemo(() => Array.from(categoriesById.values()), [categoriesById])
 
   const { expenses, incomes, expenseGroups, incomeGroups, totalExpenses, totalIncomes } = useMemo(() => {
@@ -168,17 +166,9 @@ export function TransactionsGrid({
     const el = document.getElementById(`row-${highlightKey}`)
     el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
   }, [highlightKey, days])
-  const bulk = useBulkPay({
-    workspaceId,
-    transactions,
-    cards,
-    categories,
-    visibleTransactions,
-    visibleInvoices,
-    resetKey: `${selectedMonth}|${filter}`,
-  })
+  const confirm = useConfirmPaid(workspaceId)
   // Segurar uma linha (ou "Selecionar") entra no modo seleção, com as ações
-  // em massa; fora dele continua o checkbox de "Pagar selecionados".
+  // em massa (inclusive "Pago").
   const selection = useTransactionSelection(visibleTransactions, `${selectedMonth}|${filter}|${pendingOnly}`)
   const knownTags = useMemo(() => collectTags(transactions), [transactions])
 
@@ -204,16 +194,12 @@ export function TransactionsGrid({
 
   return (
     <div className="flex flex-col gap-4">
-      {selection.active ? (
-        <SelectionActionsBar
-          workspaceId={workspaceId}
-          selection={selection}
-          categories={categories}
-          knownTags={knownTags}
-        />
-      ) : (
-        <BulkPayBar bulk={bulk} accounts={accounts} />
-      )}
+      <SelectionActionsBar
+        workspaceId={workspaceId}
+        selection={selection}
+        categories={categories}
+        knownTags={knownTags}
+      />
 
       {pendingOnly ? null : (
         <FilterStatCards stats={stats} selected={filter} onSelect={setFilter} />
@@ -290,8 +276,6 @@ export function TransactionsGrid({
                   ) : row.kind === 'invoice' ? (
                     <CardInvoiceRowCard
                       group={row.group}
-                      selected={!selection.active && bulk.selectedInvoiceKeys.has(row.key)}
-                      onToggleSelect={selection.active ? undefined : () => bulk.toggleInvoice(row.key)}
                       highlighted={highlightKey === row.key}
                     />
                   ) : (
@@ -302,17 +286,12 @@ export function TransactionsGrid({
                       category={categoriesById.get(row.transaction.categoryId)}
                       linkedName={accountsById.get(row.transaction.accountId ?? '')?.name}
                       selectMode={selection.active}
-                      selected={
-                        selection.active ? selection.selectedIds.has(row.key) : bulk.selectedIds.has(row.key)
-                      }
-                      onToggleSelect={() => (selection.active ? selection.toggle(row.key) : bulk.toggle(row.key))}
-                      onLongPress={() => {
-                        bulk.clear()
-                        selection.start(row.key)
-                      }}
+                      selected={selection.selectedIds.has(row.key)}
+                      onToggleSelect={() => selection.toggle(row.key)}
+                      onLongPress={() => selection.start(row.key)}
                       categories={categories}
-                      onConfirm={() => void bulk.confirmOne(row.transaction)}
-                      confirming={bulk.confirmingIds.has(row.key)}
+                      onConfirm={() => void confirm.confirmOne(row.transaction)}
+                      confirming={confirm.confirmingIds.has(row.key)}
                       showDate={false}
                       highlighted={highlightKey === row.key}
                     />
