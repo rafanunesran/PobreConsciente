@@ -19,23 +19,35 @@ import type { MatchPair, BankSide } from './matching'
 const BATCH_LIMIT = 450 // folga sob o limite de 500 operações do writeBatch
 
 // O lançamento do app vira "o" lançamento do banco: ganha o vínculo
-// (bankRef), passa pra data em que o banco registrou e, numa conta, fica
-// pago — se estava pendente, só agora mexe no saldo.
+// (bankRef), passa pra data e pro valor que o banco registrou (previsto
+// era estimativa — ver PLANNED_TOLERANCE) e, numa conta, fica pago — se
+// estava pendente, só agora mexe no saldo.
 function linkUpdates(manual: Transaction, bank: BankSide, isAccount: boolean) {
   const becomesPaid = isAccount && !manual.paid
+  const amount = roundToCents(bank.amount)
+  const amountChanged = Math.abs(amount - manual.amount) >= 0.005
   return {
     patch: {
       bankRef: bank.key,
       date: bank.date,
+      ...(amountChanged ? { amount } : {}),
       ...(becomesPaid ? { paid: true } : {}),
     },
-    balanceDelta: becomesPaid ? signedEffect(manual.type, manual.amount) : 0,
+    balanceDelta: becomesPaid
+      ? signedEffect(manual.type, amount)
+      : isAccount && amountChanged
+        ? signedEffect(manual.type, amount) - signedEffect(manual.type, manual.amount)
+        : 0,
   }
 }
 
-function applyInMemory(manual: Transaction, patch: { bankRef: string; date: string; paid?: boolean }) {
+function applyInMemory(
+  manual: Transaction,
+  patch: { bankRef: string; date: string; amount?: number; paid?: boolean },
+) {
   manual.bankRef = patch.bankRef
   manual.date = patch.date
+  if (patch.amount !== undefined) manual.amount = patch.amount
   if (patch.paid) manual.paid = true
 }
 
