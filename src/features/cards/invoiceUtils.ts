@@ -213,3 +213,8 @@ export function computeInvoiceMonth(
     entries,
   }
 }
+
+// Chave da linha agregada da fatura no extrato (cartão + fim do período).
+export function invoiceKey(group: CardInvoiceGroup): string {
+  return `${group.cardId}-${group.period.end}`
+}
