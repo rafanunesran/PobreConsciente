@@ -1,3 +1,4 @@
+import { roundToCents } from './dateUtils'
 import {
   collection,
   deleteDoc,
@@ -172,7 +173,7 @@ export async function createRecurringTransaction(
 
     if (data.accountId !== undefined && firstOccurrencePaid && accountSnap?.exists()) {
       transaction.update(accountDoc(uid, data.accountId), {
-        balance: accountSnap.data().balance + signedEffect(type, data.amount),
+        balance: roundToCents(accountSnap.data().balance + signedEffect(type, data.amount)),
       })
     }
 

@@ -1,3 +1,4 @@
+import { roundToCents } from '../transactions/dateUtils'
 import { doc, runTransaction } from 'firebase/firestore'
 import { db } from '../../lib/firebase'
 import { accountDoc } from '../accounts/api'
@@ -31,8 +32,8 @@ export async function depositToCaixinha(
     const caixinhaSnap = await transaction.get(caixinhaDoc(uid, caixinhaId))
     if (!accountSnap.exists()) throw new Error('Conta não encontrada.')
     if (!caixinhaSnap.exists()) throw new Error('Caixinha não encontrada.')
-    transaction.update(accountDoc(uid, accountId), { balance: accountSnap.data().balance - amount })
-    transaction.update(caixinhaDoc(uid, caixinhaId), { balance: caixinhaSnap.data().balance + amount })
+    transaction.update(accountDoc(uid, accountId), { balance: roundToCents(accountSnap.data().balance - amount) })
+    transaction.update(caixinhaDoc(uid, caixinhaId), { balance: roundToCents(caixinhaSnap.data().balance + amount) })
     transaction.set(movementRef, {
       id: movementRef.id,
       caixinhaId,
@@ -60,8 +61,8 @@ export async function withdrawFromCaixinha(
     if (!accountSnap.exists()) throw new Error('Conta não encontrada.')
     if (!caixinhaSnap.exists()) throw new Error('Caixinha não encontrada.')
     if (caixinhaSnap.data().balance < amount) throw new Error('Saldo insuficiente na caixinha.')
-    transaction.update(accountDoc(uid, accountId), { balance: accountSnap.data().balance + amount })
-    transaction.update(caixinhaDoc(uid, caixinhaId), { balance: caixinhaSnap.data().balance - amount })
+    transaction.update(accountDoc(uid, accountId), { balance: roundToCents(accountSnap.data().balance + amount) })
+    transaction.update(caixinhaDoc(uid, caixinhaId), { balance: roundToCents(caixinhaSnap.data().balance - amount) })
     transaction.set(movementRef, {
       id: movementRef.id,
       caixinhaId,
@@ -85,7 +86,7 @@ export async function closeCaixinha(uid: string, accountId: string, caixinhaId: 
     if (!caixinhaSnap.exists()) throw new Error('Caixinha não encontrada.')
     const remaining = caixinhaSnap.data().balance
     if (remaining > 0) {
-      transaction.update(accountDoc(uid, accountId), { balance: accountSnap.data().balance + remaining })
+      transaction.update(accountDoc(uid, accountId), { balance: roundToCents(accountSnap.data().balance + remaining) })
     }
     transaction.delete(caixinhaDoc(uid, caixinhaId))
   })

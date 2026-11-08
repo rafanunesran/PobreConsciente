@@ -1,3 +1,4 @@
+import { roundToCents } from './dateUtils'
 import {
   collection,
   doc,
@@ -139,7 +140,7 @@ export async function createTransaction(
 
     if (data.accountId !== undefined && data.paid === true && accountSnap?.exists()) {
       transaction.update(accountDoc(uid, data.accountId), {
-        balance: accountSnap.data().balance + signedEffect(data.type, data.amount),
+        balance: roundToCents(accountSnap.data().balance + signedEffect(data.type, data.amount)),
       })
     }
     transaction.set(newTxRef, { id: newTxRef.id, createdBy, ...data })
@@ -237,14 +238,14 @@ export async function updateTransaction(
       // mesma conta absorve reversão + aplicação num único write (cobre
       // mudança de valor, de tipo, ou ambos, mantendo a mesma conta)
       transaction.update(accountDoc(uid, oldAccountId), {
-        balance: oldAccountBalance - oldEffect + newEffect,
+        balance: roundToCents(oldAccountBalance - oldEffect + newEffect),
       })
     } else {
       if (oldAccountId !== undefined && oldAccountBalance !== undefined) {
-        transaction.update(accountDoc(uid, oldAccountId), { balance: oldAccountBalance - oldEffect })
+        transaction.update(accountDoc(uid, oldAccountId), { balance: roundToCents(oldAccountBalance - oldEffect) })
       }
       if (newAccountId !== undefined && newAccountBalance !== undefined) {
-        transaction.update(accountDoc(uid, newAccountId), { balance: newAccountBalance + newEffect })
+        transaction.update(accountDoc(uid, newAccountId), { balance: roundToCents(newAccountBalance + newEffect) })
       }
     }
 
@@ -380,7 +381,7 @@ export async function deleteTransaction(uid: string, transactionId: string): Pro
 
     if (txData.accountId !== undefined && txData.paid === true && accountSnap?.exists()) {
       transaction.update(accountDoc(uid, txData.accountId), {
-        balance: accountSnap.data().balance - signedEffect(txData.type, txData.amount),
+        balance: roundToCents(accountSnap.data().balance - signedEffect(txData.type, txData.amount)),
       })
     }
     for (const snap of reopenSnaps) {
