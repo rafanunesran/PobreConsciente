@@ -12,6 +12,11 @@ import {
 } from './sync'
 import { ACCOUNT_WINDOW_DAYS, CARD_WINDOW_DAYS, isManualCandidate, pairBankWithManual } from './matching'
 import { parseReserveMovement } from './reserveParsing'
+import { listTransferLogIds } from '../accounts/transferLog'
+import { movementBaseId } from '../caixinhas/merge'
+import { caixinhaMovementsCollection } from '../caixinhas/movements'
+import { findCaixinhaRule, listCaixinhaRules } from '../caixinhas/rules'
+import { isCreditCardTopUp } from './matching'
 import type { PluggyAccountLink, PluggyConfig } from './types'
 
 // Quanto pra trás o diagnóstico olha — além da data inicial, pra mostrar
@@ -21,6 +26,8 @@ const DIAGNOSTIC_DAYS_BACK = 60
 export type DiagnosticVerdict =
   | 'imported' // está no app
   | 'caixinha' // guardar/resgatar — vai direto pra caixinha, não vira lançamento
+  | 'transfer' // transferência entre contas da família / Pix entre vocês
+  | 'creditTopUp' // "valor adicionado por cartão de crédito" (Pix no crédito)
   | 'duplicate' // igual (data + tipo + valor) a algo já lançado no destino
   | 'beforeStart' // anterior a "importar a partir de"
   | 'billPayment' // pagamento de fatura do lado do cartão
@@ -34,6 +41,8 @@ export interface DiagnosticRow {
   amount: number // como a Pluggy mandou (sinal da fonte)
   status: string
   verdict: DiagnosticVerdict
+  // o lançamento como a sincronização o leria — pra lançar pelo diagnóstico
+  entry?: BankEntry
 }
 
 export interface DiagnosticResult {
@@ -57,10 +66,14 @@ export async function diagnoseLink(
 
   const start = config.linkSince?.[pluggyAccountId] ?? config.syncFrom
   const apiKey = await authenticate(config.clientId, config.clientSecret)
-  const [pluggyTransactions, transactionsSnap] = await Promise.all([
+  const [pluggyTransactions, transactionsSnap, transferIds, movementsSnap, rules] = await Promise.all([
     listTransactions(apiKey, pluggyAccountId, dateFrom, dateTo),
     getDocs(transactionsCollection(workspaceId)),
+    listTransferLogIds(workspaceId).catch(() => new Set<string>()),
+    getDocs(caixinhaMovementsCollection(workspaceId)),
+    listCaixinhaRules(workspaceId).catch(() => []),
   ])
+  const movementIds = new Set(movementsSnap.docs.map((d) => movementBaseId(d.id)))
   let bills: PluggyBill[] = []
   let billsError: string | undefined
   if (targetKind === 'card') {
@@ -89,13 +102,23 @@ export async function diagnoseLink(
     }
     rows.push(row)
     const entry = toBankEntry(tx, targetKind)
+    if (entry) row.entry = entry
     if (!entry) {
       row.verdict =
         targetKind === 'card' && isCardBillPayment(tx) ? 'billPayment' : tx.amount === 0 ? 'zero' : 'pending'
-    } else if (targetKind === 'account' && parseReserveMovement(entry)) {
-      row.verdict = 'caixinha'
     } else if (existingIds.has(entry.docId)) {
       row.verdict = 'imported'
+    } else if (targetKind === 'account' && transferIds.has(entry.docId)) {
+      row.verdict = 'transfer'
+    } else if (
+      'accountId' in link &&
+      (movementIds.has(`bank_${entry.docId}`) ||
+        findCaixinhaRule(rules, link.accountId, entry) !== undefined ||
+        parseReserveMovement(entry))
+    ) {
+      row.verdict = 'caixinha'
+    } else if (targetKind === 'account' && isCreditCardTopUp(entry)) {
+      row.verdict = 'creditTopUp'
     } else if (start && entry.date < start) {
       row.verdict = 'beforeStart'
     } else {

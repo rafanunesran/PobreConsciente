@@ -61,6 +61,40 @@ const AUTO_SYNC_INTERVAL_MS = 6 * 60 * 60 * 1000
 // O que já foi importado é descartado pelo id/dedupe abaixo.
 const OVERLAP_DAYS = 7
 
+// Conexão do Open Finance que ficou dias sem atualizar (consentimento
+// vencido, banco fora do ar) devolve, quando volta, lançamentos com data
+// anterior à última sincronização do app — que avançou mesmo sem dado
+// novo. Por isso a releitura também volta até o último lançamento do banco
+// já importado naquela conta/cartão, com esse teto.
+const MAX_REREAD_DAYS = 90
+
+// De onde reler uma conta/cartão: a data inicial dela, ou — depois da
+// primeira sincronização — alguns dias antes da última sincronização ou do
+// último lançamento do banco já no app (o que for mais antigo), sem passar
+// de MAX_REREAD_DAYS atrás.
+export function syncWindowStart(params: {
+  start: string
+  lastSyncAt?: string
+  latestImported?: string
+  today: string
+}): string {
+  const { start, lastSyncAt, latestImported, today } = params
+  if (!lastSyncAt) return start || today
+  const anchors = [daysBefore(lastSyncAt.slice(0, 10), OVERLAP_DAYS)]
+  if (latestImported) anchors.push(daysBefore(latestImported, OVERLAP_DAYS))
+  const earliest = anchors.sort()[0] as string
+  const floor = daysBefore(today, MAX_REREAD_DAYS)
+  return [start, earliest > floor ? earliest : floor].filter(Boolean).sort().pop() ?? today
+}
+
+// Id de um lançamento do banco que a pessoa mandou lançar pelo diagnóstico
+// (ver forceImport.ts). Não começa com `pluggy_`: a sincronização não
+// mexe nele (transferência, caixinha, conciliação); o `bankRef` diz qual
+// lançamento do banco ele é.
+export function forcedTransactionId(bankDocId: string): string {
+  return `banco_${bankDocId}`
+}
+
 export const CARD_LOOKAHEAD_DAYS = 45
 
 const DESCRIPTION_MAX = 60 // mesmo teto do form de lançamento (schemas.ts)
@@ -206,6 +240,8 @@ interface SyncContext {
   // conta conjunta, o dedupe por data + tipo + valor da segunda conexão
   // enxerga o que a primeira acabou de importar.
   transactions: Transaction[]
+  // lançamentos do banco que um lançamento do app já representa (bankRef)
+  claimedBankKeys: Set<string>
   suggest: (description: string, type: TransactionType) => string | undefined
   firstCategory: Record<TransactionType, string | undefined>
 }
@@ -250,7 +286,6 @@ async function fetchConnection(ctx: SyncContext, config: PluggyConfig): Promise<
   if (linkEntries.length === 0) return empty
 
   const today = todayDateString()
-  const overlapStart = config.lastSyncAt ? daysBefore(config.lastSyncAt.slice(0, 10), OVERLAP_DAYS) : ''
   const apiKey = await authenticate(config.clientId, config.clientSecret)
 
   // Contas da Pluggy (pra saber o saldo atual de cada uma) — uma chamada
@@ -293,7 +328,15 @@ async function fetchConnection(ctx: SyncContext, config: PluggyConfig): Promise<
     // fechamento, depois de hoje — busca até um ciclo à frente.
     const dateTo = targetKind === 'card' ? daysBefore(today, -CARD_LOOKAHEAD_DAYS) : today
     const start = config.linkSince?.[pluggyAccountId] ?? config.syncFrom
-    const dateFrom = [start, overlapStart].filter(Boolean).sort().pop() ?? today
+    const latestImported = ctx.transactions
+      .filter(
+        (t) =>
+          (t.id.startsWith('pluggy_') || t.bankRef !== undefined) &&
+          ('cardId' in link ? t.cardId === link.cardId : t.accountId === link.accountId) &&
+          t.date <= today,
+      )
+      .reduce<string | undefined>((latest, t) => (latest === undefined || t.date > latest ? t.date : latest), undefined)
+    const dateFrom = syncWindowStart({ start, lastSyncAt: config.lastSyncAt, latestImported, today })
     const fetchFrom = targetKind === 'account' ? daysBefore(dateFrom, TRANSFER_WINDOW_DAYS) : dateFrom
     const pluggyTransactions = await listTransactions(apiKey, pluggyAccountId, fetchFrom, dateTo)
 
@@ -302,7 +345,10 @@ async function fetchConnection(ctx: SyncContext, config: PluggyConfig): Promise<
     const counterparts: FetchedLink['counterparts'] = new Map()
     for (const tx of pluggyTransactions) {
       const entry = toBankEntry(tx, targetKind)
-      if (!entry) continue
+      // já representado por um lançamento do app (conciliado ou lançado
+      // pelo diagnóstico): fica como a pessoa deixou — não vira
+      // transferência, caixinha nem lançamento de novo.
+      if (!entry || ctx.claimedBankKeys.has(entry.docId)) continue
       pairingEntries.push(entry)
       if (targetKind !== 'account') continue
       if (sameDocument(tx)) ownTransferKeys.add(entry.docId)
@@ -389,6 +435,15 @@ async function detectTransfers(
   }
   const creditTopUps = findCreditTopUps(topUpSides)
 
+  // Pix/TED com a outra ponta informada pelo banco e que não é da família
+  // é com terceiro — nunca transferência entre contas de vocês, mesmo que
+  // outra conta tenha uma saída/entrada de mesmo valor nos mesmos dias.
+  const thirdParty = new Set<string>()
+  for (const f of fetched) {
+    for (const [key, other] of f.counterparts)
+      if ((other.name || other.document) && !isFamilyCounterpart(other, '', family)) thirdParty.add(key)
+  }
+
   // o que cada chave é, pra registrar no log de transferências (transferLog.ts)
   const details = new Map<string, Omit<AccountTransferLog, 'id' | 'createdBy'>>()
   for (const f of fetched) {
@@ -413,7 +468,7 @@ async function detectTransfers(
         skip.add(entry.docId)
         continue
       }
-      if (isTransferCandidate(ctx, f.link.accountId, entry))
+      if (!thirdParty.has(entry.docId) && isTransferCandidate(ctx, f.link.accountId, entry))
         sides.push({ key: entry.docId, appAccountId: f.link.accountId, ...entry })
     }
   }
@@ -436,7 +491,7 @@ async function detectTransfers(
       skip.add(t.id)
       continue
     }
-    if (!isTransferCandidate(ctx, t.accountId, t)) continue
+    if (thirdParty.has(t.id) || !isTransferCandidate(ctx, t.accountId, t)) continue
     sides.push({ key: t.id, appAccountId: t.accountId, date: t.date, type: t.type, amount: t.amount })
   }
   for (const key of findTransferPairs(sides)) skip.add(key)
@@ -642,6 +697,7 @@ async function runSync(
     caixinhaRules,
     bankBalances: new Map(),
     transactions,
+    claimedBankKeys: new Set(transactions.flatMap((t) => (t.bankRef !== undefined ? [t.bankRef] : []))),
     suggest: buildCategorySuggester(transactions),
     // Sem histórico nenhum daquele tipo, o sugeridor não tem o que propor —
     // cai na primeira categoria do tipo (a pessoa ajusta depois pela tag).

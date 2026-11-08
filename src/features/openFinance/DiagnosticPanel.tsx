@@ -7,11 +7,14 @@ import { updateCard } from '../cards/api'
 import { getInvoicePeriod, todayDateString } from '../cards/invoiceUtils'
 import { nonBankOpenCardTransactions, switchCardToBankSource } from './api'
 import type { CreditCard } from '../cards/types'
-import { diagnoseLink, type DiagnosticResult, type DiagnosticVerdict } from './diagnose'
+import { diagnoseLink, type DiagnosticResult, type DiagnosticRow, type DiagnosticVerdict } from './diagnose'
+import { forceImportBankEntry } from './forceImport'
 import type { PluggyAccount, PluggyAccountLink, PluggyConfig } from './types'
 
 const VERDICT_LABELS: Record<DiagnosticVerdict, string> = {
   caixinha: 'Caixinha (não é gasto)',
+  transfer: 'Transferência entre contas (não conta)',
+  creditTopUp: 'Pix no crédito (não conta)',
   imported: 'No app',
   duplicate: 'Conciliado com um lançamento do app',
   beforeStart: 'Antes da data inicial',
@@ -21,8 +24,14 @@ const VERDICT_LABELS: Record<DiagnosticVerdict, string> = {
   missing: 'Falta importar',
 }
 
+// O que a pessoa pode mandar lançar no app como receita/despesa (só conta
+// corrente): ficou de fora por uma regra que pode ter errado.
+const FORCEABLE: DiagnosticVerdict[] = ['transfer', 'caixinha', 'creditTopUp', 'missing', 'beforeStart']
+
 const VERDICT_CLASSES: Record<DiagnosticVerdict, string> = {
   caixinha: 'text-brand-500',
+  transfer: 'text-amber-600 dark:text-amber-400',
+  creditTopUp: 'text-amber-600 dark:text-amber-400',
   imported: 'text-brand-500',
   duplicate: 'text-amber-600 dark:text-amber-400',
   beforeStart: 'text-light-secondary dark:text-dark-secondary',
@@ -65,6 +74,7 @@ export function DiagnosticPanel({
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [working, setWorking] = useState(false)
+  const [notice, setNotice] = useState<string | null>(null)
 
   async function run() {
     setLoading(true)
@@ -75,6 +85,37 @@ export function DiagnosticPanel({
       setError(err instanceof Error ? err.message : 'Falha no diagnóstico.')
     } finally {
       setLoading(false)
+    }
+  }
+
+  async function handleForceImport(row: DiagnosticRow) {
+    if (!row.entry || !('accountId' in link)) return
+    const kind = row.entry.type === 'income' ? 'receita' : 'despesa'
+    const ok = window.confirm(
+      `Lançar "${row.entry.description}" (${formatBRL(row.entry.amount)}, ${shortDate(row.entry.date)}) como ${kind} no app?\n\n` +
+        'O saldo da conta não muda: o banco já contou esse dinheiro. Se você já lançou à mão um igual ' +
+        '(mesmo valor, até 10 dias de diferença), ele passa a ser este e o saldo é corrigido.',
+    )
+    if (!ok) return
+    setWorking(true)
+    setError(null)
+    try {
+      const done = await forceImportBankEntry({
+        workspaceId,
+        accountId: link.accountId,
+        entry: row.entry,
+        createdBy: ownerUid,
+      })
+      setNotice(
+        done.kind === 'linked'
+          ? `Usei o lançamento "${done.transaction.description}" que você já tinha feito e corrigi o saldo.`
+          : `Lançado como ${kind}.`,
+      )
+      setResult(await diagnoseLink(workspaceId, config, pluggyAccount.id, link))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Não foi possível lançar.')
+    } finally {
+      setWorking(false)
     }
   }
 
@@ -162,6 +203,7 @@ export function DiagnosticPanel({
         </Button>
       ) : null}
       {error ? <p className="text-danger">{error}</p> : null}
+      {notice ? <p className="text-brand-500">{notice}</p> : null}
 
       {result ? (
         <>
@@ -230,6 +272,19 @@ export function DiagnosticPanel({
                     {shortDate(row.date)}
                     {row.status ? ` · ${row.status === 'PENDING' ? 'pendente' : 'confirmado'}` : ''} ·{' '}
                     <span className={VERDICT_CLASSES[row.verdict]}>{VERDICT_LABELS[row.verdict]}</span>
+                    {!isCard && row.entry && FORCEABLE.includes(row.verdict) ? (
+                      <>
+                        {' · '}
+                        <button
+                          type="button"
+                          disabled={working}
+                          onClick={() => void handleForceImport(row)}
+                          className="font-medium text-brand-500 underline"
+                        >
+                          lançar como {row.entry.type === 'income' ? 'receita' : 'despesa'}
+                        </button>
+                      </>
+                    ) : null}
                   </p>
                 </div>
                 <p className="shrink-0 text-light-primary dark:text-dark-primary">{formatBRL(row.amount)}</p>
