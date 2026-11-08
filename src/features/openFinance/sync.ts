@@ -448,10 +448,16 @@ async function detectTransfers(
   const details = new Map<string, Omit<AccountTransferLog, 'id' | 'createdBy'>>()
   for (const f of fetched) {
     if (!('accountId' in f.link)) continue
-    for (const key of f.ownTransferKeys) skip.add(key)
     for (const entry of f.pairingEntries) {
       if (seen.has(entry.docId) || creditTopUps.has(entry.docId)) continue
       seen.add(entry.docId)
+      // Pagador e recebedor com o mesmo CPF é dinheiro seu indo de um lugar
+      // pro outro — mas se a descrição diz caixinha ("Dinheiro guardado",
+      // "Aplicação RDB"), é guardar/resgatar: fica pra fase das caixinhas.
+      // Antes ia pro "pular" direto e sumia de vez (nem lançamento, nem
+      // transferência, nem movimento da caixinha).
+      const reserve = reserveMovementOf(ctx, f.link.accountId, entry)
+      if (f.ownTransferKeys.has(entry.docId) && reserve === null) skip.add(entry.docId)
       details.set(entry.docId, {
         accountId: f.link.accountId,
         type: entry.type,
@@ -462,7 +468,7 @@ async function detectTransfers(
       // Pix/TED pra (ou de) alguém da família — mesmo sem a conta do outro
       // conectada, o dinheiro não saiu da casa (ver FamilyIdentity)
       if (
-        reserveMovementOf(ctx, f.link.accountId, entry) === null &&
+        reserve === null &&
         isFamilyCounterpart(f.counterparts.get(entry.docId), entry.description, family)
       ) {
         skip.add(entry.docId)

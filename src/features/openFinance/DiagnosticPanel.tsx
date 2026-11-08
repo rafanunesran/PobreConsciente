@@ -9,10 +9,12 @@ import { nonBankOpenCardTransactions, switchCardToBankSource } from './api'
 import type { CreditCard } from '../cards/types'
 import { diagnoseLink, type DiagnosticResult, type DiagnosticRow, type DiagnosticVerdict } from './diagnose'
 import { forceImportBankEntry } from './forceImport'
+import { applyBankReserves } from './caixinhaSync'
 import type { PluggyAccount, PluggyAccountLink, PluggyConfig } from './types'
 
 const VERDICT_LABELS: Record<DiagnosticVerdict, string> = {
   caixinha: 'Caixinha (não é gasto)',
+  caixinhaMissing: 'Caixinha, mas não aparece no extrato',
   transfer: 'Transferência entre contas (não conta)',
   creditTopUp: 'Pix no crédito (não conta)',
   imported: 'No app',
@@ -26,10 +28,18 @@ const VERDICT_LABELS: Record<DiagnosticVerdict, string> = {
 
 // O que a pessoa pode mandar lançar no app como receita/despesa (só conta
 // corrente): ficou de fora por uma regra que pode ter errado.
-const FORCEABLE: DiagnosticVerdict[] = ['transfer', 'caixinha', 'creditTopUp', 'missing', 'beforeStart']
+const FORCEABLE: DiagnosticVerdict[] = [
+  'transfer',
+  'caixinha',
+  'caixinhaMissing',
+  'creditTopUp',
+  'missing',
+  'beforeStart',
+]
 
 const VERDICT_CLASSES: Record<DiagnosticVerdict, string> = {
   caixinha: 'text-brand-500',
+  caixinhaMissing: 'text-danger',
   transfer: 'text-amber-600 dark:text-amber-400',
   creditTopUp: 'text-amber-600 dark:text-amber-400',
   imported: 'text-brand-500',
@@ -114,6 +124,70 @@ export function DiagnosticPanel({
       setResult(await diagnoseLink(workspaceId, config, pluggyAccount.id, link))
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Não foi possível lançar.')
+    } finally {
+      setWorking(false)
+    }
+  }
+
+  // Guardar/resgatar que a sincronização deixou de fora: vai pro histórico
+  // da caixinha e aparece no extrato da conta (linha "Guardado — X"), sem
+  // mexer no saldo da conta, que já é o do banco.
+  async function handleRecordReserve(row: DiagnosticRow) {
+    if (!row.entry || !row.reserve || !('accountId' in link)) return
+    setWorking(true)
+    setError(null)
+    try {
+      await applyBankReserves(
+        workspaceId,
+        [
+          {
+            key: row.entry.docId,
+            accountId: link.accountId,
+            date: row.entry.date,
+            amount: row.entry.amount,
+            movement: row.reserve,
+            historyOnly: true,
+          },
+        ],
+        ownerUid,
+      )
+      setNotice('Lançado na caixinha. Aparece no extrato da conta e o saldo da conta não mudou.')
+      setResult(await diagnoseLink(workspaceId, config, pluggyAccount.id, link))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Não foi possível lançar na caixinha.')
+    } finally {
+      setWorking(false)
+    }
+  }
+
+  async function handleRecordAllReserves() {
+    if (!result || !('accountId' in link)) return
+    const accountId = link.accountId
+    const items = result.rows.flatMap((row) =>
+      row.verdict === 'caixinhaMissing' && row.entry && row.reserve
+        ? [
+            {
+              key: row.entry.docId,
+              accountId,
+              date: row.entry.date,
+              amount: row.entry.amount,
+              movement: row.reserve,
+              historyOnly: true,
+            },
+          ]
+        : [],
+    )
+    if (items.length === 0) return
+    setWorking(true)
+    setError(null)
+    try {
+      await applyBankReserves(workspaceId, items, ownerUid)
+      setNotice(
+        `${items.length} ${items.length === 1 ? 'movimentação lançada' : 'movimentações lançadas'} na caixinha. O saldo da conta não mudou.`,
+      )
+      setResult(await diagnoseLink(workspaceId, config, pluggyAccount.id, link))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Não foi possível lançar na caixinha.')
     } finally {
       setWorking(false)
     }
@@ -263,6 +337,16 @@ export function DiagnosticPanel({
             )}
           </p>
 
+          {!isCard && (counts.caixinhaMissing ?? 0) > 0 ? (
+            <Button type="button" variant="secondary" onClick={handleRecordAllReserves} disabled={working}>
+              {working
+                ? 'Lançando...'
+                : counts.caixinhaMissing === 1
+                  ? 'Mostrar no extrato a movimentação de caixinha que falta'
+                  : `Mostrar no extrato as ${counts.caixinhaMissing} movimentações de caixinha que faltam`}
+            </Button>
+          ) : null}
+
           <div className="flex max-h-80 flex-col gap-1 overflow-y-auto">
             {result.rows.map((row, i) => (
               <div key={i} className="flex items-start justify-between gap-2">
@@ -272,6 +356,19 @@ export function DiagnosticPanel({
                     {shortDate(row.date)}
                     {row.status ? ` · ${row.status === 'PENDING' ? 'pendente' : 'confirmado'}` : ''} ·{' '}
                     <span className={VERDICT_CLASSES[row.verdict]}>{VERDICT_LABELS[row.verdict]}</span>
+                    {!isCard && row.entry && row.reserve && row.verdict === 'caixinhaMissing' ? (
+                      <>
+                        {' · '}
+                        <button
+                          type="button"
+                          disabled={working}
+                          onClick={() => void handleRecordReserve(row)}
+                          className="font-medium text-brand-500 underline"
+                        >
+                          lançar na caixinha
+                        </button>
+                      </>
+                    ) : null}
                     {!isCard && row.entry && FORCEABLE.includes(row.verdict) ? (
                       <>
                         {' · '}

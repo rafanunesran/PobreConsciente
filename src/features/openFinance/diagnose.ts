@@ -11,13 +11,25 @@ import {
   type BankEntry,
 } from './sync'
 import { ACCOUNT_WINDOW_DAYS, CARD_WINDOW_DAYS, isManualCandidate, pairBankWithManual } from './matching'
-import { parseReserveMovement } from './reserveParsing'
+import { parseReserveMovement, type ReserveMovement } from './reserveParsing'
 import { listTransferLogIds } from '../accounts/transferLog'
 import { movementBaseId } from '../caixinhas/merge'
 import { caixinhaMovementsCollection } from '../caixinhas/movements'
-import { findCaixinhaRule, listCaixinhaRules } from '../caixinhas/rules'
+import { type CaixinhaRule, findCaixinhaRule, listCaixinhaRules } from '../caixinhas/rules'
 import { isCreditCardTopUp } from './matching'
 import type { PluggyAccountLink, PluggyConfig } from './types'
+
+// Mesma leitura da sincronização (reserveMovementOf em sync.ts): primeiro
+// a marcação da pessoa, senão a descrição.
+function reserveOf(
+  rules: CaixinhaRule[],
+  accountId: string,
+  entry: BankEntry,
+): ReserveMovement | null {
+  const rule = findCaixinhaRule(rules, accountId, entry)
+  if (rule) return { kind: rule.type === 'expense' ? 'guardar' : 'resgatar', caixinhaId: rule.caixinhaId }
+  return parseReserveMovement(entry)
+}
 
 // Quanto pra trás o diagnóstico olha — além da data inicial, pra mostrar
 // também o que ficou de fora por ser anterior a ela.
@@ -26,6 +38,7 @@ const DIAGNOSTIC_DAYS_BACK = 60
 export type DiagnosticVerdict =
   | 'imported' // está no app
   | 'caixinha' // guardar/resgatar — vai direto pra caixinha, não vira lançamento
+  | 'caixinhaMissing' // é guardar/resgatar mas não está no histórico da caixinha
   | 'transfer' // transferência entre contas da família / Pix entre vocês
   | 'creditTopUp' // "valor adicionado por cartão de crédito" (Pix no crédito)
   | 'duplicate' // igual (data + tipo + valor) a algo já lançado no destino
@@ -43,6 +56,8 @@ export interface DiagnosticRow {
   verdict: DiagnosticVerdict
   // o lançamento como a sincronização o leria — pra lançar pelo diagnóstico
   entry?: BankEntry
+  // guardar/resgatar que ainda não está na caixinha — pra lançar nela
+  reserve?: ReserveMovement
 }
 
 export interface DiagnosticResult {
@@ -103,6 +118,7 @@ export async function diagnoseLink(
     rows.push(row)
     const entry = toBankEntry(tx, targetKind)
     if (entry) row.entry = entry
+    const reserve = entry && 'accountId' in link ? reserveOf(rules, link.accountId, entry) : null
     if (!entry) {
       row.verdict =
         targetKind === 'card' && isCardBillPayment(tx) ? 'billPayment' : tx.amount === 0 ? 'zero' : 'pending'
@@ -110,13 +126,14 @@ export async function diagnoseLink(
       row.verdict = 'imported'
     } else if (targetKind === 'account' && transferIds.has(entry.docId)) {
       row.verdict = 'transfer'
-    } else if (
-      'accountId' in link &&
-      (movementIds.has(`bank_${entry.docId}`) ||
-        findCaixinhaRule(rules, link.accountId, entry) !== undefined ||
-        parseReserveMovement(entry))
-    ) {
+    } else if ('accountId' in link && movementIds.has(`bank_${entry.docId}`)) {
       row.verdict = 'caixinha'
+    } else if (reserve) {
+      // a sincronização reconhece como caixinha, mas o movimento não foi
+      // gravado (ex.: o banco mandou com o mesmo CPF dos dois lados e ele
+      // caía como transferência sem ir pra lugar nenhum)
+      row.verdict = start && entry.date < start ? 'beforeStart' : 'caixinhaMissing'
+      row.reserve = reserve
     } else if (targetKind === 'account' && isCreditCardTopUp(entry)) {
       row.verdict = 'creditTopUp'
     } else if (start && entry.date < start) {
