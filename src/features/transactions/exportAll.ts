@@ -1,3 +1,4 @@
+import { todayDateString } from '../cards/invoiceUtils'
 import { getDocs } from 'firebase/firestore'
 import { accountsCollection } from '../accounts/api'
 import { cardsCollection } from '../cards/api'
@@ -22,6 +23,6 @@ export async function exportAllTransactionsCsv(uid: string): Promise<void> {
       cardsById: new Map(cards.docs.map((d) => [d.id, d.data()])),
     },
   )
-  const today = new Date().toISOString().slice(0, 10)
+  const today = todayDateString()
   downloadCsv(`pobreconsciente-lancamentos-${today}.csv`, csv)
 }

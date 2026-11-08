@@ -85,7 +85,7 @@ export async function payCardInvoice(
     }
 
     transaction.update(accountDoc(uid, params.accountId), {
-      balance: accountSnap.data().balance + signedEffect('expense', params.amountPaid),
+      balance: roundToCents(accountSnap.data().balance + signedEffect('expense', params.amountPaid)),
     })
 
     transaction.set(paymentRef, {

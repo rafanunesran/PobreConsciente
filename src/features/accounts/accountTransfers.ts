@@ -1,3 +1,4 @@
+import { roundToCents } from '../transactions/dateUtils'
 import { runTransaction } from 'firebase/firestore'
 import { db } from '../../lib/firebase'
 import { accountDoc } from './api'
@@ -24,8 +25,8 @@ export async function transferBetweenAccounts(
     if (!fromSnap.exists()) throw new Error('Conta de origem não encontrada.')
     if (!toSnap.exists()) throw new Error('Conta de destino não encontrada.')
     if (fromSnap.data().balance < amount) throw new Error('Saldo insuficiente na conta de origem.')
-    transaction.update(accountDoc(uid, fromAccountId), { balance: fromSnap.data().balance - amount })
-    transaction.update(accountDoc(uid, toAccountId), { balance: toSnap.data().balance + amount })
+    transaction.update(accountDoc(uid, fromAccountId), { balance: roundToCents(fromSnap.data().balance - amount) })
+    transaction.update(accountDoc(uid, toAccountId), { balance: roundToCents(toSnap.data().balance + amount) })
     return { from: fromSnap.data().name, to: toSnap.data().name }
   })
   // Fora da transação e sem falhar a transferência: o saldo já mudou, o

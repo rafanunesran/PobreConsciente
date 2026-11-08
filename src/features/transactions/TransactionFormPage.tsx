@@ -35,13 +35,16 @@ import { MarkCaixinhaDialog } from '../caixinhas/MarkCaixinhaDialog'
 import { canMarkAsCaixinha, similarTransactions } from '../caixinhas/markTransaction'
 import { addAttachment, deleteAttachmentsOf, type NewAttachment } from '../attachments/api'
 import { collectTags } from './tags'
+import { todayDateString } from '../cards/invoiceUtils'
 import { useTransactions } from './useTransactions'
 import type { Transaction, TransactionFormData } from './types'
 
 type Kind = 'despesa' | 'receita'
 
+// Data local — toISOString() é UTC e, depois das 21h no Brasil, já
+// devolvia o dia seguinte.
 function todayISO(): string {
-  return new Date().toISOString().slice(0, 10)
+  return todayDateString()
 }
 
 export function TransactionFormPage() {

@@ -84,7 +84,7 @@ export async function createInstallmentTransaction(
 
     if (data.accountId !== undefined && firstOccurrencePaid && accountSnap?.exists()) {
       transaction.update(accountDoc(uid, data.accountId), {
-        balance: accountSnap.data().balance + signedEffect(type, first.amount),
+        balance: roundToCents(accountSnap.data().balance + signedEffect(type, first.amount)),
       })
     }
 
