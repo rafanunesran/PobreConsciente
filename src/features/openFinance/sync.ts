@@ -434,6 +434,18 @@ async function detectTransfers(
     })
   }
   const creditTopUps = findCreditTopUps(topUpSides)
+  // Pix no crédito também aparece no extrato como passagem (log), sem contar
+  const topUpDetails = new Map<string, Omit<AccountTransferLog, 'id' | 'createdBy'>>()
+  for (const side of topUpSides) {
+    if (!creditTopUps.has(side.key) || topUpDetails.has(side.key)) continue
+    topUpDetails.set(side.key, {
+      accountId: side.appAccountId,
+      type: side.type,
+      amount: side.amount,
+      date: side.date,
+      description: side.description,
+    })
+  }
 
   // Pix/TED com a outra ponta informada pelo banco e que não é da família
   // é com terceiro — nunca transferência entre contas de vocês, mesmo que
@@ -508,8 +520,8 @@ async function detectTransfers(
   try {
     const logged = await listTransferLogIds(ctx.workspaceId)
     const logs: AccountTransferLog[] = []
-    for (const key of skip) {
-      const detail = details.get(key)
+    for (const key of [...skip, ...creditTopUps]) {
+      const detail = details.get(key) ?? topUpDetails.get(key)
       if (detail && !logged.has(key) && reserveMovementOf(ctx, detail.accountId, detail) === null)
         logs.push({ id: key, ...detail, createdBy: ctx.createdBy })
     }

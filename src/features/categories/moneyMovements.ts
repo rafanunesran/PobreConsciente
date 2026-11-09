@@ -4,6 +4,7 @@ import { transferLogsCollection, type AccountTransferLog } from '../accounts/tra
 import { caixinhasCollection } from '../caixinhas/api'
 import { caixinhaMovementsCollection } from '../caixinhas/movements'
 import type { Caixinha, CaixinhaMovement } from '../caixinhas/types'
+import type { Transaction } from '../transactions/types'
 
 // Dinheiro que só muda de lugar — transferência entre contas, guardar e
 // resgatar caixinha — não é receita nem despesa. No extrato ele aparece
@@ -62,16 +63,21 @@ export function useMoneyMovements(uid: string): MoneyMovements {
 // caixinha. Com `accountId`, só o que é dessa conta (caixinha conta pela
 // conta a que pertence). Rendimento e ajuste ficam de fora — rendimento já
 // é receita de verdade.
+// `representedIds`: ids (e bankRef) dos lançamentos do app — uma
+// transferência registrada que depois virou lançamento (ex.: lançada pelo
+// diagnóstico) não aparece duas vezes.
 export function moneyMovementRows(
   movements: MoneyMovements,
   selectedMonth: string,
   accountId?: string,
+  representedIds?: Set<string>,
 ): MoneyMovementRow[] {
   const caixinhasById = new Map(movements.caixinhas.map((c) => [c.id, c]))
   const rows: MoneyMovementRow[] = []
 
   for (const t of movements.transfers) {
     if (!t.date.startsWith(selectedMonth)) continue
+    if (representedIds?.has(t.id)) continue
     if (accountId !== undefined && t.accountId !== accountId) continue
     rows.push({
       key: `transfer-${t.id}`,
@@ -102,4 +108,8 @@ export function moneyMovementRows(
     })
   }
   return rows
+}
+
+export function representedTransactionIds(transactions: Transaction[]): Set<string> {
+  return new Set(transactions.flatMap((t) => (t.bankRef !== undefined ? [t.id, t.bankRef] : [t.id])))
 }

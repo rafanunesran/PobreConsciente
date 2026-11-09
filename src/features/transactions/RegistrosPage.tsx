@@ -8,7 +8,7 @@ import { useAccounts } from '../accounts/useAccounts'
 import { useCards } from '../cards/useCards'
 import { useCategories } from '../categories/useCategories'
 import { TransactionsGrid } from './TransactionsGrid'
-import { moneyMovementRows, useMoneyMovements } from '../categories/moneyMovements'
+import { moneyMovementRows, representedTransactionIds, useMoneyMovements } from '../categories/moneyMovements'
 import { MonthSelector } from '../../components/ui/MonthSelector'
 import { currentYearMonth } from './dateUtils'
 import { Button } from '../../components/ui/Button'
@@ -47,8 +47,8 @@ export function RegistrosPage() {
   )
   const moneyMovements = useMoneyMovements(workspaceId ?? '')
   const movementRows = useMemo(
-    () => moneyMovementRows(moneyMovements, selectedMonth),
-    [moneyMovements, selectedMonth],
+    () => moneyMovementRows(moneyMovements, selectedMonth, undefined, representedTransactionIds(transactions)),
+    [moneyMovements, selectedMonth, transactions],
   )
   const tags = useMemo(() => collectTags(transactions), [transactions])
   const filtering = hasActiveFilters(filters)
