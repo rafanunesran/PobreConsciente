@@ -293,6 +293,13 @@ export const router = createBrowserRouter(
           },
         },
         {
+          path: 'historico-banco',
+          lazy: async () => {
+            const { BankHistoryPage } = await import('./features/openFinance/BankHistoryPage')
+            return { Component: BankHistoryPage }
+          },
+        },
+        {
           path: 'familia',
           lazy: async () => {
             const { FamilyPage } = await import('./features/family/FamilyPage')

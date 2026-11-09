@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, History, Plus, Settings } from 'lucide-react'
+import { ArrowLeft, Landmark, Plus, Settings } from 'lucide-react'
 import { useAuthStore } from '../../stores/authStore'
 import { useWorkspaceStore } from '../../stores/workspaceStore'
 import { useAccounts } from './useAccounts'
@@ -18,8 +18,6 @@ import { Button } from '../../components/ui/Button'
 import { formatBRL } from '../../lib/utils'
 import { useUserProfiles } from '../family/useUserProfiles'
 import { listPluggyConfigs } from '../openFinance/api'
-import { recoverAccountMovements } from '../openFinance/recoverMovements'
-import { useToastStore } from '../../stores/toastStore'
 
 export function AccountDetailPage() {
   const navigate = useNavigate()
@@ -29,12 +27,8 @@ export function AccountDetailPage() {
   const family = useWorkspaceStore((state) => state.family)
   const [menuOpen, setMenuOpen] = useState(false)
   const [selectedMonth, setSelectedMonth] = useState(currentYearMonth())
-  const showToast = useToastStore((state) => state.show)
-  // conta ligada à conexão bancária: dá pra buscar no banco as
-  // transferências e reservas que não aparecem no extrato
+  // conta ligada à conexão bancária: atalho pro Histórico do banco dela
   const [bankLinked, setBankLinked] = useState(false)
-  const [recovering, setRecovering] = useState(false)
-  const [recoverError, setRecoverError] = useState<string | null>(null)
 
   useEffect(() => {
     if (!workspaceId || !accountId) return
@@ -53,25 +47,6 @@ export function AccountDetailPage() {
       cancelled = true
     }
   }, [workspaceId, accountId])
-
-  async function handleRecover() {
-    if (!workspaceId || !accountId || !user) return
-    setRecovering(true)
-    setRecoverError(null)
-    try {
-      const { transfers, reserves } = await recoverAccountMovements(workspaceId, accountId, user.uid)
-      const found = transfers + reserves
-      showToast(
-        found === 0
-          ? 'Nada novo: tudo do banco no último ano já aparece no extrato.'
-          : `${found} ${found === 1 ? 'movimentação trazida' : 'movimentações trazidas'} do banco (${transfers} de transferência, ${reserves} de caixinha). O saldo não mudou.`,
-      )
-    } catch (err) {
-      setRecoverError(err instanceof Error ? err.message : 'Não foi possível buscar no banco.')
-    } finally {
-      setRecovering(false)
-    }
-  }
 
   const { accounts, loading: loadingAccounts } = useAccounts(workspaceId ?? '')
   const { transactions } = useTransactions(workspaceId ?? '')
@@ -187,20 +162,13 @@ export function AccountDetailPage() {
           <div className="flex flex-col gap-4 lg:w-2/3">
             <MonthSelector value={selectedMonth} onChange={setSelectedMonth} />
             {bankLinked ? (
-              <div className="flex flex-col gap-1">
-                <button
-                  type="button"
-                  disabled={recovering}
-                  onClick={() => void handleRecover()}
-                  className="flex items-center gap-1.5 self-start text-xs font-medium text-brand-500 disabled:opacity-60"
-                >
-                  <History size={14} />
-                  {recovering
-                    ? 'Buscando no banco...'
-                    : 'Buscar no banco transferências e caixinha que não aparecem (último ano)'}
-                </button>
-                {recoverError ? <p className="text-xs text-danger">{recoverError}</p> : null}
-              </div>
+              <Link
+                to={`/historico-banco?conta=${account.id}`}
+                className="flex items-center gap-1.5 self-start text-xs font-medium text-brand-500"
+              >
+                <Landmark size={14} />
+                Histórico do banco desta conta (trazer pro controle o que faltou)
+              </Link>
             ) : null}
             <TransactionsGrid
               workspaceId={workspaceId ?? ''}
