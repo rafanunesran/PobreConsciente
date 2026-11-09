@@ -75,10 +75,10 @@ export interface ReserveItem {
   // lançamento importado antes desta regra (virou despesa/receita): sai
   // do extrato, sem mexer de novo no saldo da conta — o efeito dele já está lá
   legacyTransactionId?: string
-  // lançado pelo diagnóstico, depois do fato: o saldo da conta já é o do
-  // banco e o da caixinha ligada ao banco também (a diferença já tinha
-  // entrado como ajuste) — só registra o movimento pra aparecer no
-  // extrato. Caixinha sem vínculo com o banco ainda recebe o valor.
+  // trazido depois do fato (diagnóstico, "buscar movimentações no
+  // banco"): os saldos já estão certos — o da conta é o do banco e o da
+  // caixinha já foi acertado — então só registra o movimento, pra
+  // aparecer no extrato. Nenhum saldo muda.
   historyOnly?: boolean
 }
 
@@ -155,7 +155,7 @@ export async function applyBankReserves(
             batch.set(ref, caixinha)
             caixinhas.push(caixinha)
           }
-          if (!item.historyOnly || caixinha.bankRef === undefined) {
+          if (!item.historyOnly) {
             batch.update(doc(caixinhasCollection(workspaceId), caixinha.id), { balance: increment(signed) })
             caixinha.balance += signed
           }

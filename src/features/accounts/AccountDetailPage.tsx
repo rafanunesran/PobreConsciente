@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, Plus, Settings } from 'lucide-react'
+import { ArrowLeft, History, Plus, Settings } from 'lucide-react'
 import { useAuthStore } from '../../stores/authStore'
 import { useWorkspaceStore } from '../../stores/workspaceStore'
 import { useAccounts } from './useAccounts'
@@ -10,13 +10,16 @@ import { useCards } from '../cards/useCards'
 import { useCaixinhas } from '../caixinhas/useCaixinhas'
 import { CaixinhaCard } from '../caixinhas/CaixinhaCard'
 import { TransactionsGrid } from '../transactions/TransactionsGrid'
-import { moneyMovementRows, useMoneyMovements } from '../categories/moneyMovements'
+import { moneyMovementRows, representedTransactionIds, useMoneyMovements } from '../categories/moneyMovements'
 import { MonthSelector } from '../../components/ui/MonthSelector'
 import { currentYearMonth } from '../transactions/dateUtils'
 import { ACCOUNT_TYPE_LABELS } from './types'
 import { Button } from '../../components/ui/Button'
 import { formatBRL } from '../../lib/utils'
 import { useUserProfiles } from '../family/useUserProfiles'
+import { listPluggyConfigs } from '../openFinance/api'
+import { recoverAccountMovements } from '../openFinance/recoverMovements'
+import { useToastStore } from '../../stores/toastStore'
 
 export function AccountDetailPage() {
   const navigate = useNavigate()
@@ -26,6 +29,49 @@ export function AccountDetailPage() {
   const family = useWorkspaceStore((state) => state.family)
   const [menuOpen, setMenuOpen] = useState(false)
   const [selectedMonth, setSelectedMonth] = useState(currentYearMonth())
+  const showToast = useToastStore((state) => state.show)
+  // conta ligada à conexão bancária: dá pra buscar no banco as
+  // transferências e reservas que não aparecem no extrato
+  const [bankLinked, setBankLinked] = useState(false)
+  const [recovering, setRecovering] = useState(false)
+  const [recoverError, setRecoverError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!workspaceId || !accountId) return
+    let cancelled = false
+    listPluggyConfigs(workspaceId)
+      .then((configs) => {
+        if (cancelled) return
+        setBankLinked(
+          configs.some((c) =>
+            Object.values(c.links).some((link) => 'accountId' in link && link.accountId === accountId),
+          ),
+        )
+      })
+      .catch(() => undefined)
+    return () => {
+      cancelled = true
+    }
+  }, [workspaceId, accountId])
+
+  async function handleRecover() {
+    if (!workspaceId || !accountId || !user) return
+    setRecovering(true)
+    setRecoverError(null)
+    try {
+      const { transfers, reserves } = await recoverAccountMovements(workspaceId, accountId, user.uid)
+      const found = transfers + reserves
+      showToast(
+        found === 0
+          ? 'Nada novo: tudo do banco no último ano já aparece no extrato.'
+          : `${found} ${found === 1 ? 'movimentação trazida' : 'movimentações trazidas'} do banco (${transfers} de transferência, ${reserves} de caixinha). O saldo não mudou.`,
+      )
+    } catch (err) {
+      setRecoverError(err instanceof Error ? err.message : 'Não foi possível buscar no banco.')
+    } finally {
+      setRecovering(false)
+    }
+  }
 
   const { accounts, loading: loadingAccounts } = useAccounts(workspaceId ?? '')
   const { transactions } = useTransactions(workspaceId ?? '')
@@ -47,8 +93,8 @@ export function AccountDetailPage() {
 
   const moneyMovements = useMoneyMovements(workspaceId ?? '')
   const movementRows = useMemo(
-    () => moneyMovementRows(moneyMovements, selectedMonth, accountId),
-    [moneyMovements, selectedMonth, accountId],
+    () => moneyMovementRows(moneyMovements, selectedMonth, accountId, representedTransactionIds(transactions)),
+    [moneyMovements, selectedMonth, accountId, transactions],
   )
 
   const accountTransactions = useMemo(
@@ -140,6 +186,22 @@ export function AccountDetailPage() {
         <div className="flex flex-col gap-6 lg:flex-row">
           <div className="flex flex-col gap-4 lg:w-2/3">
             <MonthSelector value={selectedMonth} onChange={setSelectedMonth} />
+            {bankLinked ? (
+              <div className="flex flex-col gap-1">
+                <button
+                  type="button"
+                  disabled={recovering}
+                  onClick={() => void handleRecover()}
+                  className="flex items-center gap-1.5 self-start text-xs font-medium text-brand-500 disabled:opacity-60"
+                >
+                  <History size={14} />
+                  {recovering
+                    ? 'Buscando no banco...'
+                    : 'Buscar no banco transferências e caixinha que não aparecem (último ano)'}
+                </button>
+                {recoverError ? <p className="text-xs text-danger">{recoverError}</p> : null}
+              </div>
+            ) : null}
             <TransactionsGrid
               workspaceId={workspaceId ?? ''}
               transactions={accountTransactions}

@@ -15,7 +15,12 @@ import { MonthSelector } from '../../components/ui/MonthSelector'
 import { currentYearMonth } from './dateUtils'
 import { FilterStatCards, type FilterStat } from './FilterStatCards'
 import { MoneyMovementRowCard } from './MoneyMovementRowCard'
-import { moneyMovementRows, useMoneyMovements, type MoneyMovementRow } from '../categories/moneyMovements'
+import {
+  moneyMovementRows,
+  representedTransactionIds,
+  useMoneyMovements,
+  type MoneyMovementRow,
+} from '../categories/moneyMovements'
 import type { BalanceMovement } from './balanceHistory'
 
 // Mesmos cards-filtro do extrato: Saldo lista tudo (transferências e
@@ -45,7 +50,12 @@ export function BalanceHistoryPage() {
   const { stats, items } = useMemo(() => {
     const includedIds = new Set(accounts.filter((a) => a.includeInTotal).map((a) => a.id))
     const ofMonth = history.movements.filter((m) => m.date.startsWith(selectedMonth))
-    const rows = moneyMovementRows(moneyMovements, selectedMonth).filter(
+    const rows = moneyMovementRows(
+      moneyMovements,
+      selectedMonth,
+      undefined,
+      representedTransactionIds(transactions),
+    ).filter(
       (r) => r.accountId !== undefined && includedIds.has(r.accountId),
     )
     const incomes = ofMonth.filter((m) => m.type === 'income').reduce((sum, m) => sum + m.amount, 0)
@@ -72,7 +82,7 @@ export function BalanceHistoryPage() {
     // ordem estável: dentro do mesmo dia, mantém a ordem do histórico
     const items = [...balanceItems, ...moneyItems].sort((a, b) => b.date.localeCompare(a.date))
     return { stats, items }
-  }, [accounts, history.movements, moneyMovements, selectedMonth, filter])
+  }, [accounts, history.movements, moneyMovements, selectedMonth, filter, transactions])
   const accountNames = useMemo(() => new Map(accounts.map((a) => [a.id, a.name])), [accounts])
 
   if (!user || !workspaceId) return null
