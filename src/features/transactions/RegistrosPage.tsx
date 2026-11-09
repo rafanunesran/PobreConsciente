@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
-import { Download, Plus, Receipt } from 'lucide-react'
+import { Download, Landmark, Plus, Receipt } from 'lucide-react'
 import { useAuthStore } from '../../stores/authStore'
 import { useWorkspaceStore } from '../../stores/workspaceStore'
 import { useTransactions } from './useTransactions'
@@ -89,6 +89,12 @@ export function RegistrosPage() {
           Extrato
         </h1>
         <div className="flex gap-2">
+          <Link to="/historico-banco" aria-label="Histórico do banco">
+            <Button type="button" variant="secondary" className="gap-1.5">
+              <Landmark size={18} />
+              <span className="hidden sm:inline">Banco</span>
+            </Button>
+          </Link>
           {transactions.length > 0 ? (
             <Button type="button" variant="secondary" className="gap-1.5" onClick={handleExport} aria-label="Exportar CSV">
               <Download size={18} />

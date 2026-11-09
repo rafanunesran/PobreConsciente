@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 import { ArrowLeft, ExternalLink, Landmark, RefreshCw, Users } from 'lucide-react'
@@ -294,7 +294,7 @@ export function OpenFinancePage() {
             Conexão bancária
           </h1>
           <p className="text-sm text-light-secondary dark:text-dark-secondary">
-            Importa os gastos do banco automaticamente (Open Finance via Meu Pluggy)
+            Cartões entram sozinhos; as contas ficam no Histórico do banco (Open Finance via Meu Pluggy)
           </p>
         </div>
       </div>
@@ -313,7 +313,7 @@ export function OpenFinancePage() {
             />
           ))}
           <p className="text-xs text-light-secondary dark:text-dark-secondary">
-            O app sincroniza sozinho ao ser aberto (no máximo a cada 6 horas)
+            O app sincroniza os cartões sozinho ao ser aberto (no máximo a cada 6 horas)
             {otherConfigs.length > 0 ? ', as conexões de toda a família' : ''}. O banco atualiza o Meu Pluggy
             uma vez por dia.
           </p>
@@ -535,6 +535,17 @@ export function OpenFinancePage() {
                 // só pra vínculo já salvo — é o que a sincronização usa
                 const savedLink = config?.links[pluggyAccount.id]
                 if (!config || !savedLink) return null
+                // conta corrente não é mais importada sozinha: o que veio do
+                // banco fica no Histórico do banco
+                if ('accountId' in savedLink)
+                  return (
+                    <Link
+                      to={`/historico-banco?conta=${savedLink.accountId}`}
+                      className="border-t border-border-light pt-2 text-xs font-medium text-brand-500 dark:border-border-dark"
+                    >
+                      Ver as movimentações desta conta no Histórico do banco
+                    </Link>
+                  )
                 return (
                   <DiagnosticPanel
                     workspaceId={workspaceId}
@@ -551,7 +562,7 @@ export function OpenFinancePage() {
           ))}
 
           <Input
-            label="Importar lançamentos a partir de"
+            label="Importar lançamentos de cartão a partir de"
             name="pluggySyncFrom"
             type="date"
             value={syncFrom}

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowDownCircle, ArrowLeftRight, ArrowUpCircle, Calculator, Plus, RefreshCw, X } from 'lucide-react'
+import { ArrowDownCircle, ArrowLeftRight, ArrowUpCircle, Calculator, Landmark, Plus, RefreshCw, X } from 'lucide-react'
 import { FloatingCalculator } from './FloatingCalculator'
 import { useQuickAddStore } from '../../stores/quickAddStore'
 import { useAuthStore } from '../../stores/authStore'
@@ -39,7 +39,7 @@ export function FAB() {
     return () => window.removeEventListener('keydown', onKey)
   }, [open, setOpen])
 
-  // Mesmo "Sincronizar agora" da tela de Conexão bancária, com o resultado
+  // Mesmo "Sincronizar agora" da tela de Conexão bancária (só cartões), com o resultado
   // num aviso. Sem conexão configurada, leva pra tela de configurar.
   async function syncAccounts() {
     if (!user || !workspaceId) return
@@ -49,7 +49,7 @@ export function FAB() {
         navigate('/conexao-bancaria')
         return
       }
-      showToast('Sincronizando contas...')
+      showToast('Sincronizando cartões...')
       const result = await syncBankTransactions(workspaceId, user.uid)
       if (result.errors.length > 0)
         showToast(`Sincronização com erro: ${result.errors.join(' ')}`, { label: 'Ver', to: '/conexao-bancaria' })
@@ -85,8 +85,15 @@ export function FAB() {
       action: () => navigate('/contas/transferir'),
     },
     {
-      title: 'Sincronizar contas',
-      description: 'Buscar agora os lançamentos e saldos do banco',
+      title: 'Histórico do banco',
+      description: 'Ver o que saiu e entrou na conta e trazer pro controle',
+      icon: Landmark,
+      className: 'bg-emerald-500/15 text-emerald-500',
+      action: () => navigate('/historico-banco'),
+    },
+    {
+      title: 'Sincronizar cartões',
+      description: 'Buscar agora as compras dos cartões no banco',
       icon: RefreshCw,
       className: 'bg-sky-500/15 text-sky-500',
       action: () => void syncAccounts(),

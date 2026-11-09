@@ -7,9 +7,7 @@ import { updateCard } from '../cards/api'
 import { getInvoicePeriod, todayDateString } from '../cards/invoiceUtils'
 import { nonBankOpenCardTransactions, switchCardToBankSource } from './api'
 import type { CreditCard } from '../cards/types'
-import { diagnoseLink, type DiagnosticResult, type DiagnosticRow, type DiagnosticVerdict } from './diagnose'
-import { forceImportBankEntry } from './forceImport'
-import { applyBankReserves } from './caixinhaSync'
+import { diagnoseLink, type DiagnosticResult, type DiagnosticVerdict } from './diagnose'
 import type { PluggyAccount, PluggyAccountLink, PluggyConfig } from './types'
 
 const VERDICT_LABELS: Record<DiagnosticVerdict, string> = {
@@ -25,17 +23,6 @@ const VERDICT_LABELS: Record<DiagnosticVerdict, string> = {
   zero: 'Valor zero',
   missing: 'Falta importar',
 }
-
-// O que a pessoa pode mandar lançar no app como receita/despesa (só conta
-// corrente): ficou de fora por uma regra que pode ter errado.
-const FORCEABLE: DiagnosticVerdict[] = [
-  'transfer',
-  'caixinha',
-  'caixinhaMissing',
-  'creditTopUp',
-  'missing',
-  'beforeStart',
-]
 
 const VERDICT_CLASSES: Record<DiagnosticVerdict, string> = {
   caixinha: 'text-brand-500',
@@ -84,7 +71,6 @@ export function DiagnosticPanel({
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [working, setWorking] = useState(false)
-  const [notice, setNotice] = useState<string | null>(null)
 
   async function run() {
     setLoading(true)
@@ -95,101 +81,6 @@ export function DiagnosticPanel({
       setError(err instanceof Error ? err.message : 'Falha no diagnóstico.')
     } finally {
       setLoading(false)
-    }
-  }
-
-  async function handleForceImport(row: DiagnosticRow) {
-    if (!row.entry || !('accountId' in link)) return
-    const kind = row.entry.type === 'income' ? 'receita' : 'despesa'
-    const ok = window.confirm(
-      `Lançar "${row.entry.description}" (${formatBRL(row.entry.amount)}, ${shortDate(row.entry.date)}) como ${kind} no app?\n\n` +
-        'O saldo da conta não muda: o banco já contou esse dinheiro. Se você já lançou à mão um igual ' +
-        '(mesmo valor, até 10 dias de diferença), ele passa a ser este e o saldo é corrigido.',
-    )
-    if (!ok) return
-    setWorking(true)
-    setError(null)
-    try {
-      const done = await forceImportBankEntry({
-        workspaceId,
-        accountId: link.accountId,
-        entry: row.entry,
-        createdBy: ownerUid,
-      })
-      setNotice(
-        done.kind === 'linked'
-          ? `Usei o lançamento "${done.transaction.description}" que você já tinha feito e corrigi o saldo.`
-          : `Lançado como ${kind}.`,
-      )
-      setResult(await diagnoseLink(workspaceId, config, pluggyAccount.id, link))
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Não foi possível lançar.')
-    } finally {
-      setWorking(false)
-    }
-  }
-
-  // Guardar/resgatar que a sincronização deixou de fora: vai pro histórico
-  // da caixinha e aparece no extrato da conta (linha "Guardado — X"), sem
-  // mexer no saldo da conta, que já é o do banco.
-  async function handleRecordReserve(row: DiagnosticRow) {
-    if (!row.entry || !row.reserve || !('accountId' in link)) return
-    setWorking(true)
-    setError(null)
-    try {
-      await applyBankReserves(
-        workspaceId,
-        [
-          {
-            key: row.entry.docId,
-            accountId: link.accountId,
-            date: row.entry.date,
-            amount: row.entry.amount,
-            movement: row.reserve,
-            historyOnly: true,
-          },
-        ],
-        ownerUid,
-      )
-      setNotice('Lançado na caixinha. Aparece no extrato da conta e o saldo da conta não mudou.')
-      setResult(await diagnoseLink(workspaceId, config, pluggyAccount.id, link))
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Não foi possível lançar na caixinha.')
-    } finally {
-      setWorking(false)
-    }
-  }
-
-  async function handleRecordAllReserves() {
-    if (!result || !('accountId' in link)) return
-    const accountId = link.accountId
-    const items = result.rows.flatMap((row) =>
-      row.verdict === 'caixinhaMissing' && row.entry && row.reserve
-        ? [
-            {
-              key: row.entry.docId,
-              accountId,
-              date: row.entry.date,
-              amount: row.entry.amount,
-              movement: row.reserve,
-              historyOnly: true,
-            },
-          ]
-        : [],
-    )
-    if (items.length === 0) return
-    setWorking(true)
-    setError(null)
-    try {
-      await applyBankReserves(workspaceId, items, ownerUid)
-      setNotice(
-        `${items.length} ${items.length === 1 ? 'movimentação lançada' : 'movimentações lançadas'} na caixinha. O saldo da conta não mudou.`,
-      )
-      setResult(await diagnoseLink(workspaceId, config, pluggyAccount.id, link))
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Não foi possível lançar na caixinha.')
-    } finally {
-      setWorking(false)
     }
   }
 
@@ -277,7 +168,6 @@ export function DiagnosticPanel({
         </Button>
       ) : null}
       {error ? <p className="text-danger">{error}</p> : null}
-      {notice ? <p className="text-brand-500">{notice}</p> : null}
 
       {result ? (
         <>
@@ -337,16 +227,6 @@ export function DiagnosticPanel({
             )}
           </p>
 
-          {!isCard && (counts.caixinhaMissing ?? 0) > 0 ? (
-            <Button type="button" variant="secondary" onClick={handleRecordAllReserves} disabled={working}>
-              {working
-                ? 'Lançando...'
-                : counts.caixinhaMissing === 1
-                  ? 'Mostrar no extrato a movimentação de caixinha que falta'
-                  : `Mostrar no extrato as ${counts.caixinhaMissing} movimentações de caixinha que faltam`}
-            </Button>
-          ) : null}
-
           <div className="flex max-h-80 flex-col gap-1 overflow-y-auto">
             {result.rows.map((row, i) => (
               <div key={i} className="flex items-start justify-between gap-2">
@@ -356,32 +236,6 @@ export function DiagnosticPanel({
                     {shortDate(row.date)}
                     {row.status ? ` · ${row.status === 'PENDING' ? 'pendente' : 'confirmado'}` : ''} ·{' '}
                     <span className={VERDICT_CLASSES[row.verdict]}>{VERDICT_LABELS[row.verdict]}</span>
-                    {!isCard && row.entry && row.reserve && row.verdict === 'caixinhaMissing' ? (
-                      <>
-                        {' · '}
-                        <button
-                          type="button"
-                          disabled={working}
-                          onClick={() => void handleRecordReserve(row)}
-                          className="font-medium text-brand-500 underline"
-                        >
-                          lançar na caixinha
-                        </button>
-                      </>
-                    ) : null}
-                    {!isCard && row.entry && FORCEABLE.includes(row.verdict) ? (
-                      <>
-                        {' · '}
-                        <button
-                          type="button"
-                          disabled={working}
-                          onClick={() => void handleForceImport(row)}
-                          className="font-medium text-brand-500 underline"
-                        >
-                          lançar como {row.entry.type === 'income' ? 'receita' : 'despesa'}
-                        </button>
-                      </>
-                    ) : null}
                   </p>
                 </div>
                 <p className="shrink-0 text-light-primary dark:text-dark-primary">{formatBRL(row.amount)}</p>
