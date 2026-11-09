@@ -134,6 +134,13 @@ export function CardInvoicePage() {
                     Importar fatura
                   </Link>
                   <Link
+                    to={`/cartoes/${card.id}/importar?paga=1`}
+                    onClick={() => setMenuOpen(false)}
+                    className="px-4 py-2.5 text-left text-sm text-light-primary transition-colors duration-200 hover:bg-border-light dark:text-dark-primary dark:hover:bg-border-dark"
+                  >
+                    Prever parcelas de fatura paga
+                  </Link>
+                  <Link
                     to={`/cartoes/${card.id}/corrigir-importacao?offset=${periodOffset}`}
                     onClick={() => setMenuOpen(false)}
                     className="px-4 py-2.5 text-left text-sm text-light-primary transition-colors duration-200 hover:bg-border-light dark:text-dark-primary dark:hover:bg-border-dark"

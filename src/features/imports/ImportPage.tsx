@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 import { ArrowLeft, FileWarning, Upload } from 'lucide-react'
@@ -16,7 +16,8 @@ import { buildCategorySuggester } from './categorize'
 import { isLikelyDuplicate } from './duplicates'
 import { expandFutureInstallments } from './expandInstallments'
 import { importTransactions } from './api'
-import type { ImportTarget, ParsedEntry } from './types'
+import type { ImportTarget, ParsedEntry, ReviewedEntry } from './types'
+import { PaidInvoiceProjection } from './PaidInvoiceProjection'
 import { categoryOptions } from '../categories/categoryTree'
 
 interface ReviewRow extends ParsedEntry {
@@ -35,6 +36,12 @@ export function ImportPage() {
   const user = useAuthStore((state) => state.user)
   const workspaceId = useWorkspaceStore((state) => state.workspaceId)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const [searchParams] = useSearchParams()
+  // Cartão: "fatura já paga" só lê as parcelas e projeta as futuras (ver
+  // projectInstallments.ts); "lançar" é a importação normal.
+  const [mode, setMode] = useState<'import' | 'paid'>(
+    cardId && searchParams.get('paga') === '1' ? 'paid' : 'import',
+  )
 
   const { accounts } = useAccounts(workspaceId ?? '')
   const { cards } = useCards(workspaceId ?? '')
@@ -68,7 +75,7 @@ export function ImportPage() {
       setRows(
         parsed.map((entry) => ({
           ...entry,
-          selected: !isLikelyDuplicate(entry, scopedTransactions),
+          selected: mode === 'paid' || !isLikelyDuplicate(entry, scopedTransactions),
           categoryId: suggest(entry.description, entry.type) ?? '',
           likelyDuplicate: isLikelyDuplicate(entry, scopedTransactions),
         })),
@@ -90,6 +97,29 @@ export function ImportPage() {
       next[index] = { ...row, ...patch }
       return next
     })
+  }
+
+  function changeMode(next: 'import' | 'paid') {
+    setMode(next)
+    // seleção da importação normal desmarca possíveis duplicatas; na
+    // projeção toda parcelada começa marcada (as já existentes são puladas
+    // parcela a parcela)
+    setRows((current) =>
+      current?.map((r) => ({ ...r, selected: next === 'paid' || !r.likelyDuplicate })) ?? current,
+    )
+  }
+
+  async function handleProjection(entries: ReviewedEntry[]) {
+    if (!user || !workspaceId || !cardId) return
+    setImporting(true)
+    setImportError(null)
+    try {
+      await importTransactions(workspaceId, entries, { cardId }, user.uid)
+      navigate(`/cartoes/${cardId}/fatura`)
+    } catch (err) {
+      setImportError(err instanceof Error ? err.message : 'Não foi possível criar as parcelas. Tente novamente.')
+      setImporting(false)
+    }
   }
 
   function resetFile() {
@@ -142,7 +172,11 @@ export function ImportPage() {
         </button>
         <div className="min-w-0 flex-1">
           <h1 className="truncate text-xl font-semibold text-light-primary dark:text-dark-primary">
-            {targetKind === 'card' ? 'Importar fatura' : 'Importar extrato'}
+            {targetKind === 'card'
+              ? mode === 'paid'
+                ? 'Parcelas de fatura já paga'
+                : 'Importar fatura'
+              : 'Importar extrato'}
           </h1>
           {targetName ? (
             <p className="text-sm text-light-secondary dark:text-dark-secondary">{targetName}</p>
@@ -150,12 +184,39 @@ export function ImportPage() {
         </div>
       </div>
 
+      {targetKind === 'card' ? (
+        <div className="grid grid-cols-2 gap-1 rounded-xl border border-border-light p-1 text-sm dark:border-border-dark">
+          {(
+            [
+              ['import', 'Lançar fatura'],
+              ['paid', 'Fatura já paga'],
+            ] as const
+          ).map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              onClick={() => changeMode(value)}
+              disabled={importing}
+              className={cn(
+                'rounded-lg px-3 py-1.5 font-medium transition-colors duration-200',
+                mode === value
+                  ? 'bg-brand-500 text-white'
+                  : 'text-light-secondary hover:text-light-primary dark:text-dark-secondary dark:hover:text-dark-primary',
+              )}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      ) : null}
+
       {!rows ? (
         <div className="flex flex-col items-center gap-4 rounded-2xl border border-dashed border-border-light py-12 text-center dark:border-border-dark">
           <Upload size={32} className="text-light-secondary dark:text-dark-secondary" />
           <p className="max-w-xs text-sm text-light-secondary dark:text-dark-secondary">
-            Envie um arquivo .csv, .ofx ou .pdf {targetKind === 'card' ? 'da fatura' : 'do extrato'}.
-            Você vai poder revisar tudo antes de confirmar.
+            {mode === 'paid'
+              ? 'Envie o .csv, .ofx ou .pdf de uma fatura que você já pagou. Nada dela é lançado: o app só acha as compras parceladas e prevê as próximas parcelas.'
+              : `Envie um arquivo .csv, .ofx ou .pdf ${targetKind === 'card' ? 'da fatura' : 'do extrato'}. Você vai poder revisar tudo antes de confirmar.`}
           </p>
           <input
             ref={fileInputRef}
@@ -172,6 +233,18 @@ export function ImportPage() {
           </Button>
           {parseError ? <p className="max-w-xs text-sm text-danger">{parseError}</p> : null}
         </div>
+      ) : mode === 'paid' && card ? (
+        <PaidInvoiceProjection
+          card={card}
+          rows={rows}
+          categories={categories}
+          cardTransactions={scopedTransactions}
+          importing={importing}
+          importError={importError}
+          onUpdateRow={updateRow}
+          onConfirm={(entries) => void handleProjection(entries)}
+          onReset={resetFile}
+        />
       ) : (
         <>
           {fileFormat === 'pdf' ? (
