@@ -76,6 +76,9 @@ export interface BankSide {
   type: TransactionType
   amount: number
   description: string
+  // parcela informada pelo banco (cartão), ex: 4 de 10
+  installmentIndex?: number
+  installmentTotal?: number
 }
 
 // Lançamentos do app que podem ser "o mesmo" que um do banco: os que não
@@ -103,9 +106,33 @@ function isPlannedEstimate(bank: BankSide, manual: Transaction): boolean {
   )
 }
 
+// Parcela prevista no app (ex: projetada a partir de uma fatura já paga)
+// e a mesma parcela vinda do banco: a data pode não bater (a fatura do
+// banco às vezes usa a data da compra original, outras a do lançamento),
+// mas número da parcela + valor exato bastam dentro de ~uma fatura.
+const INSTALLMENT_WINDOW_DAYS = 40
+const INSTALLMENT_MAX_DAYS = 400
+
+function hasInstallment(side: { installmentIndex?: number; installmentTotal?: number }): boolean {
+  return side.installmentIndex !== undefined && side.installmentTotal !== undefined
+}
+
+function isSameInstallmentNumber(bank: BankSide, manual: Transaction): boolean {
+  return bank.installmentIndex === manual.installmentIndex && bank.installmentTotal === manual.installmentTotal
+}
+
 function isPlausibleMatch(bank: BankSide, manual: Transaction, windowDays: number): boolean {
   if (bank.type !== manual.type) return false
   const distance = dayDistance(bank.date, manual.date)
+  if (hasInstallment(bank) && hasInstallment(manual)) {
+    // parcelas diferentes (3/10 x 4/10) nunca são o mesmo lançamento
+    if (!isSameInstallmentNumber(bank, manual)) return false
+    if (isExactAmount(bank, manual)) {
+      if (distance <= INSTALLMENT_WINDOW_DAYS) return true
+      // banco que data toda parcela com o dia da compra original
+      if (distance <= INSTALLMENT_MAX_DAYS && sharesWord(bank.description, manual.description)) return true
+    }
+  }
   if (distance > windowDays) return false
   if (!isExactAmount(bank, manual)) return isPlannedEstimate(bank, manual)
   if (distance <= CLOSE_DAYS) return true

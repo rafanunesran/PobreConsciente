@@ -268,6 +268,8 @@ async function processLink(ctx: SyncContext, f: FetchedLink): Promise<number> {
       type: t.type,
       amount: t.amount,
       description: t.description,
+      installmentIndex: t.installmentIndex,
+      installmentTotal: t.installmentTotal,
       imported: t,
     }))
   const cleanup = pairBankWithManual(importedSides, scopedNow().filter(isManualCandidate), CARD_WINDOW_DAYS)
