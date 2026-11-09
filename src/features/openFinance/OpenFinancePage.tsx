@@ -21,6 +21,7 @@ import { authenticate, getItem, listAccounts } from './pluggyClient'
 import { syncBankTransactions } from './sync'
 import { describeSyncResult } from './syncSummary'
 import type { PluggyAccount, PluggyAccountLink, PluggyConfig } from './types'
+import { clearAccountHistory, previewAccountHistoryCleanup } from './clearAccountHistory'
 
 interface FoundAccount extends PluggyAccount {
   institution: string
@@ -93,6 +94,42 @@ export function OpenFinancePage() {
   const [syncing, setSyncing] = useState(false)
   const [syncMessage, setSyncMessage] = useState<string | null>(null)
   const [syncError, setSyncError] = useState<string | null>(null)
+  const [clearing, setClearing] = useState(false)
+  const [clearMessage, setClearMessage] = useState<string | null>(null)
+  const [clearError, setClearError] = useState<string | null>(null)
+
+  // Apaga das contas o que veio do banco (cartões ficam) — ver
+  // clearAccountHistory.ts. Mostra antes quanto vai sair.
+  async function handleClearAccountHistory() {
+    if (!workspaceId) return
+    setClearing(true)
+    setClearMessage(null)
+    setClearError(null)
+    try {
+      const plan = await previewAccountHistoryCleanup(workspaceId)
+      const total = plan.transactions.length + plan.transferIds.length + plan.movementIds.length
+      if (total === 0) {
+        setClearMessage('Nada pra limpar: as contas não têm lançamentos vindos do banco.')
+        return
+      }
+      const ok = window.confirm(
+        'Apagar das contas o que veio do banco?\n\n' +
+          `• ${plan.transactions.length} lançamento(s) de conta importados do banco\n` +
+          `• ${plan.transferIds.length} transferência(s) registradas a partir do banco\n` +
+          `• ${plan.movementIds.length} movimento(s) de caixinha vindos do banco\n\n` +
+          'Ficam: tudo dos cartões, pagamentos de fatura, o que você lançou à mão e o que fez pelo app. ' +
+          'Nenhum saldo muda. Depois, o que faltar você traz pelo Histórico do banco.\n\n' +
+          'Não dá pra desfazer.',
+      )
+      if (!ok) return
+      await clearAccountHistory(workspaceId, plan)
+      setClearMessage(`Pronto: ${total} registro(s) do banco apagado(s) das contas. Os cartões não mudaram.`)
+    } catch (err) {
+      setClearError(err instanceof Error ? err.message : 'Não foi possível limpar.')
+    } finally {
+      setClearing(false)
+    }
+  }
 
   async function fetchAccounts(id: string, secret: string, itemIds: string[]) {
     setFetching(true)
@@ -578,6 +615,16 @@ export function OpenFinancePage() {
           <Button type="button" onClick={handleSave} disabled={!canSave}>
             {saving ? 'Salvando...' : 'Salvar e sincronizar'}
           </Button>
+        </div>
+      ) : null}
+
+      {config ? (
+        <div className="flex flex-col gap-1">
+          <Button type="button" variant="secondary" onClick={handleClearAccountHistory} disabled={clearing}>
+            {clearing ? 'Limpando...' : 'Limpar das contas o que veio do banco (cartões ficam)'}
+          </Button>
+          {clearMessage ? <p className="text-sm text-brand-500">{clearMessage}</p> : null}
+          {clearError ? <p className="text-sm text-danger">{clearError}</p> : null}
         </div>
       ) : null}
 
