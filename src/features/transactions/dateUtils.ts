@@ -42,3 +42,11 @@ export function currentYearMonth(): string {
   const now = new Date()
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
 }
+
+// Mesmo dia no mês seguinte; dia que não existe lá vira o último do mês
+// (31/jan → 28 ou 29/fev). Usado pelo "Adiar" dos pendentes.
+export function nextMonthSameDay(date: string): string {
+  const { year, month1based, day } = parseDate(date)
+  const next = addMonthsClamped(year, month1based, day, 1)
+  return formatDate(next.year, next.month1based, next.day)
+}

@@ -291,6 +291,7 @@ export function TransactionsGrid({
                       onLongPress={() => selection.start(row.key)}
                       categories={categories}
                       onConfirm={() => void confirm.confirmOne(row.transaction)}
+                      onPostpone={() => void confirm.postponeOne(row.transaction)}
                       confirming={confirm.confirmingIds.has(row.key)}
                       showDate={false}
                       highlighted={highlightKey === row.key}

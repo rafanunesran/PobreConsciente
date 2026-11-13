@@ -2,7 +2,7 @@ import { useRef, useState, type DragEvent, type MouseEvent, type PointerEvent } 
 import { Link } from 'react-router-dom'
 import { format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
-import { CheckCircle2, Pencil, Receipt } from 'lucide-react'
+import { CalendarClock, CheckCircle2, Pencil, Receipt } from 'lucide-react'
 import { CATEGORY_ICON_COMPONENTS } from '../categories/types'
 import type { Category } from '../categories/types'
 import { PaymentStatusBadge } from './PaymentStatusBadge'
@@ -26,6 +26,8 @@ interface TransactionCompactCardProps {
   // Controles de pagamento (extrato/pendentes) — quando presente e o
   // lançamento ainda está pendente, mostra o botão "Marcar pago"/"Recebido".
   onConfirm?: () => void
+  // "Adiar" do pendente — joga pro mesmo dia do mês seguinte.
+  onPostpone?: () => void
   confirming?: boolean
   // Dentro de uma lista já agrupada por dia, a data no subtítulo é redundante.
   showDate?: boolean
@@ -128,6 +130,7 @@ export function TransactionCompactCard({
   selected,
   onToggleSelect,
   onConfirm,
+  onPostpone,
   confirming,
   showDate = true,
   highlighted = false,
@@ -141,6 +144,7 @@ export function TransactionCompactCard({
   const authorName = family ? profiles.get(transaction.createdBy)?.displayName : undefined
 
   const payable = !selectMode && onConfirm !== undefined && !transaction.paid
+  const postponable = payable && onPostpone !== undefined && transaction.cardId === undefined
   const quickCategory = !selectMode && categories !== undefined
   const [pickingCategory, setPickingCategory] = useState(false)
   const showToast = useToastStore((state) => state.show)
@@ -230,15 +234,29 @@ export function TransactionCompactCard({
           {formatBRL(transaction.amount)}
         </p>
         {payable ? (
-          <button
-            type="button"
-            disabled={confirming}
-            onClick={onConfirm}
-            className="relative z-10 inline-flex items-center gap-1 rounded-full border border-warning/40 bg-warning/10 px-2 py-0.5 text-[11px] font-semibold text-warning transition-colors duration-200 hover:border-brand-500 hover:bg-brand-500/10 hover:text-brand-500 disabled:opacity-50"
-          >
-            <CheckCircle2 size={12} />
-            {confirming ? 'Salvando' : transaction.type === 'expense' ? 'Marcar pago' : 'Marcar recebido'}
-          </button>
+          <div className="flex items-center gap-1">
+            {postponable ? (
+              <button
+                type="button"
+                disabled={confirming}
+                onClick={onPostpone}
+                title="Jogar para o mesmo dia do mês que vem"
+                className="relative z-10 inline-flex items-center gap-1 rounded-full border border-border-light px-2 py-0.5 text-[11px] font-semibold text-light-secondary transition-colors duration-200 hover:border-brand-500 hover:text-brand-500 disabled:opacity-50 dark:border-border-dark dark:text-dark-secondary"
+              >
+                <CalendarClock size={12} />
+                Adiar
+              </button>
+            ) : null}
+            <button
+              type="button"
+              disabled={confirming}
+              onClick={onConfirm}
+              className="relative z-10 inline-flex items-center gap-1 rounded-full border border-warning/40 bg-warning/10 px-2 py-0.5 text-[11px] font-semibold text-warning transition-colors duration-200 hover:border-brand-500 hover:bg-brand-500/10 hover:text-brand-500 disabled:opacity-50"
+            >
+              <CheckCircle2 size={12} />
+              {confirming ? 'Salvando' : transaction.type === 'expense' ? 'Marcar pago' : 'Marcar recebido'}
+            </button>
+          </div>
         ) : selectMode ? null : (
           <PaymentStatusBadge paid={transaction.paid} type={transaction.type} />
         )}

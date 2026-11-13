@@ -12,6 +12,7 @@ import {
 import { db } from '../../lib/firebase'
 import { accountDoc } from '../accounts/api'
 import { isAutoCategory } from './categorySource'
+import { nextMonthSameDay } from './dateUtils'
 import { TRANSACTION_TYPES, type Transaction, type TransactionFormData, type TransactionType } from './types'
 
 // NOTE: mesmo padrão de narrowing campo a campo de accounts/api.ts e
@@ -349,6 +350,31 @@ export async function setTransactionsPaid(
   const targets = transactions.filter((t) => t.accountId !== undefined && t.paid !== paid)
   for (const { id, ...data } of targets) {
     await updateTransaction(uid, id, { ...data, paid })
+  }
+  return targets.length
+}
+
+// "Adiar": joga o pendente pro mesmo dia do mês seguinte. Só pendente
+// (não pago não mexe em saldo, então basta trocar a data) e só fora do
+// cartão — no cartão a data decide a fatura, e quem paga é a fatura. Vale só
+// pro lançamento escolhido: recorrência e parcelas seguintes ficam onde
+// estavam (o id da ocorrência não muda, então a recorrência não recria o mês
+// que ficou vazio). Retorna quantos foram adiados.
+export function canPostpone(t: Pick<Transaction, 'paid' | 'cardId'>): boolean {
+  return !t.paid && t.cardId === undefined
+}
+
+export async function postponeTransactions(
+  uid: string,
+  transactions: Pick<Transaction, 'id' | 'date' | 'paid' | 'cardId'>[],
+): Promise<number> {
+  const targets = transactions.filter(canPostpone)
+  for (let i = 0; i < targets.length; i += BATCH_SIZE) {
+    const batch = writeBatch(db)
+    for (const t of targets.slice(i, i + BATCH_SIZE)) {
+      batch.update(transactionDoc(uid, t.id), { date: nextMonthSameDay(t.date) })
+    }
+    await batch.commit()
   }
   return targets.length
 }
