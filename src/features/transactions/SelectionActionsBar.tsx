@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { CheckCircle2, SquareCheck, Clock, Hash, Shapes, Square, Trash2, X } from 'lucide-react'
+import { CalendarClock, CheckCircle2, SquareCheck, Clock, Hash, Shapes, Square, Trash2, X } from 'lucide-react'
 import { Button } from '../../components/ui/Button'
 import { Input } from '../../components/ui/Input'
 import { cn, formatBRL } from '../../lib/utils'
@@ -9,7 +9,9 @@ import type { Category } from '../categories/types'
 import { CategoryPickerSheet } from './CategoryPickerSheet'
 import {
   addTagToTransactions,
+  canPostpone,
   deleteManyTransactions,
+  postponeTransactions,
   setTransactionsPaid,
   updateTransactionsCategory,
 } from './api'
@@ -54,6 +56,7 @@ export function SelectionActionsBar({
   const singleType = types.size === 1 ? selected[0]?.type : undefined
   const canPay = allowPayment && selected.some((t) => t.accountId !== undefined && !t.paid)
   const canUnpay = allowPayment && selected.some((t) => t.accountId !== undefined && t.paid)
+  const canDelay = selected.some(canPostpone)
 
   async function run(action: () => Promise<string>) {
     setError(null)
@@ -157,6 +160,22 @@ export function SelectionActionsBar({
                 }
               >
                 Pendente
+              </ActionChip>
+            ) : null}
+            {canDelay ? (
+              <ActionChip
+                icon={<CalendarClock size={14} />}
+                disabled={busy}
+                onClick={() =>
+                  void run(async () => {
+                    const n = await postponeTransactions(workspaceId, selected)
+                    return `${plural(n, 'lançamento adiado', 'lançamentos adiados')} para o mês que vem${
+                      n < count ? ' (pagos e de cartão ficam onde estão).' : '.'
+                    }`
+                  })
+                }
+              >
+                Adiar
               </ActionChip>
             ) : null}
             <ActionChip icon={<Hash size={14} />} disabled={busy} onClick={() => setSheet('tag')}>
