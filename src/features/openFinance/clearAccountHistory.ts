@@ -12,8 +12,9 @@ const BATCH_LIMIT = 450
 // passou a ir pelo Histórico do banco, os lançamentos que a sincronização
 // antiga trouxe pras contas sobram. Apaga só o que veio do banco na conta
 // corrente:
-// - lançamentos de conta importados (`pluggy_…`) ou lançados pelo
-//   diagnóstico/histórico (`banco_…`);
+// - lançamentos de conta importados sozinhos pela sincronização antiga
+//   (`pluggy_…`). Os que a pessoa trouxe pelo Histórico do banco
+//   (`banco_…`) ficam: foram escolha dela;
 // - transferências registradas a partir do banco (log `pluggy_…`);
 // - movimentos de caixinha vindos do banco (`bank_…`).
 // Fica: tudo dos cartões, pagamento de fatura (está ligado às compras do
@@ -30,7 +31,7 @@ function isBankAccountTransaction(t: Transaction): boolean {
   return (
     t.accountId !== undefined &&
     t.cardId === undefined &&
-    (t.id.startsWith('pluggy_') || t.id.startsWith('banco_')) &&
+    t.id.startsWith('pluggy_') &&
     (t.paidTransactionIds === undefined || t.paidTransactionIds.length === 0)
   )
 }

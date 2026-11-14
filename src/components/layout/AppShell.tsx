@@ -12,6 +12,7 @@ import { upsertMyProfile } from '../../features/family/userProfiles'
 import { topUpRecurringRules } from '../../features/transactions/recurring'
 import { notifyUpcomingBills } from '../../features/reminders/billNotifications'
 import { autoSyncBankTransactions } from '../../features/openFinance/sync'
+import { migrateAccountLinks } from '../../features/openFinance/api'
 import { removeLegacyCaixinhaTransactions } from '../../features/openFinance/caixinhaSync'
 
 // NOTE: abaixo de `lg`, comportamento igual ao original (coluna única de
@@ -66,7 +67,12 @@ export function AppShell() {
   // configuração e aparece na tela de Conexão bancária.
   useEffect(() => {
     if (user && workspaceId && !workspaceLoading) {
-      autoSyncBankTransactions(workspaceId, user.uid).catch(() => undefined)
+      // antes, tira as contas correntes de `links` (ver splitLinks): versão
+      // antiga em cache em outro aparelho deixa de importar a conta sozinha
+      migrateAccountLinks(workspaceId, user.uid)
+        .catch(() => false)
+        .then(() => autoSyncBankTransactions(workspaceId, user.uid))
+        .catch(() => undefined)
     }
   }, [user, workspaceId, workspaceLoading])
 

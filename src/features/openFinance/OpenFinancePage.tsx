@@ -114,10 +114,10 @@ export function OpenFinancePage() {
       }
       const ok = window.confirm(
         'Apagar das contas o que veio do banco?\n\n' +
-          `• ${plan.transactions.length} lançamento(s) de conta importados do banco\n` +
+          `• ${plan.transactions.length} lançamento(s) de conta que a sincronização puxou sozinha\n` +
           `• ${plan.transferIds.length} transferência(s) registradas a partir do banco\n` +
           `• ${plan.movementIds.length} movimento(s) de caixinha vindos do banco\n\n` +
-          'Ficam: tudo dos cartões, pagamentos de fatura, o que você lançou à mão e o que fez pelo app. ' +
+          'Ficam: tudo dos cartões, pagamentos de fatura, o que você lançou à mão, o que trouxe pelo Histórico do banco como receita/despesa e o que fez pelo app. ' +
           'Nenhum saldo muda. Depois, o que faltar você traz pelo Histórico do banco.\n\n' +
           'Não dá pra desfazer.',
       )
