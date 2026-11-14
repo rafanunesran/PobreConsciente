@@ -40,9 +40,13 @@ function parseConfig(docId: string, data: Record<string, unknown>): PluggyConfig
   if (!docId.startsWith(ID_PREFIX)) return null
   if (typeof data.clientId !== 'string' || typeof data.clientSecret !== 'string') return null
 
+  // No app é um mapa só; no Firestore os vínculos de conta ficam em
+  // `accountLinks` (ver splitLinks). `links` antigo com conta ainda é lido.
   const links: Record<string, PluggyAccountLink> = {}
-  if (data.links && typeof data.links === 'object') {
-    for (const [pluggyAccountId, value] of Object.entries(data.links as Record<string, unknown>)) {
+  for (const field of ['links', 'accountLinks'] as const) {
+    const raw = data[field]
+    if (!raw || typeof raw !== 'object') continue
+    for (const [pluggyAccountId, value] of Object.entries(raw as Record<string, unknown>)) {
       const link = parseLink(value)
       if (link) links[pluggyAccountId] = link
     }
@@ -84,6 +88,43 @@ export async function listPluggyConfigs(uid: string): Promise<PluggyConfig[]> {
     .filter((config): config is PluggyConfig => config !== null)
 }
 
+// Por que dois campos: versões antigas do app (as que ficam no cache do
+// celular até o service worker trocar) leem só `links` e, achando conta
+// corrente ali, importavam os lançamentos dela e copiavam o saldo do banco
+// por cima do saldo do app. Com as contas em `accountLinks`, a versão
+// antiga só enxerga os cartões — que continuam automáticos de qualquer jeito.
+export function splitLinks(links: Record<string, PluggyAccountLink>): {
+  links: Record<string, PluggyAccountLink>
+  accountLinks: Record<string, PluggyAccountLink>
+} {
+  const cards: Record<string, PluggyAccountLink> = {}
+  const accounts: Record<string, PluggyAccountLink> = {}
+  for (const [pid, link] of Object.entries(links)) {
+    if ('cardId' in link) cards[pid] = link
+    else accounts[pid] = link
+  }
+  return { links: cards, accountLinks: accounts }
+}
+
+// Conexão gravada antes da separação: tira as contas de `links`. Só o dono
+// pode (regras do Firestore); roda ao abrir o app, silencioso e idempotente.
+export async function migrateAccountLinks(uid: string, ownerUid: string): Promise<boolean> {
+  const ref = configRef(uid, ownerUid)
+  const snapshot = await getDoc(ref)
+  if (!snapshot.exists()) return false
+  const raw = snapshot.data().links
+  if (!raw || typeof raw !== 'object') return false
+  const hasAccount = Object.values(raw as Record<string, unknown>).some((value) => {
+    const link = parseLink(value)
+    return link !== undefined && 'accountId' in link
+  })
+  if (!hasAccount) return false
+  const config = parseConfig(snapshot.id, snapshot.data())
+  if (!config) return false
+  await updateDoc(ref, splitLinks(config.links))
+  return true
+}
+
 export async function savePluggyConfig(
   uid: string,
   ownerUid: string,
@@ -96,8 +137,8 @@ export async function savePluggyConfig(
   // importado é descartado pelo id/dedupe, então reler é seguro.
   await setDoc(
     configRef(uid, ownerUid),
-    { ...config, lastSyncAt: deleteField() },
-    { mergeFields: ['clientId', 'clientSecret', 'itemIds', 'links', 'syncFrom', 'lastSyncAt'] },
+    { ...config, ...splitLinks(config.links), lastSyncAt: deleteField() },
+    { mergeFields: ['clientId', 'clientSecret', 'itemIds', 'links', 'accountLinks', 'syncFrom', 'lastSyncAt'] },
   )
 }
 
